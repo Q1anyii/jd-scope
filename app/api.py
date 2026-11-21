@@ -640,6 +640,17 @@ class Api:
             conn.close()
 
     # ---------- 公司档案（一家公司一个文件夹） ----------
+    @route("POST", r"/api/resume/general")
+    def general_resume(self, m, body, q):
+        conn = self._conn()
+        try:
+            item = companies.ensure_general(conn)
+            return {"ok": True, "company": item}
+        except OSError as exc:
+            return {"error": f"建通用简历文件夹失败：{exc}"}
+        finally:
+            conn.close()
+
     @route("GET", r"/api/companies")
     def list_companies(self, m, body, q):
         conn = self._conn()
@@ -754,6 +765,55 @@ class Api:
         conn = self._conn()
         try:
             return companies.open_folder(conn, cid)
+        finally:
+            conn.close()
+
+    @route("POST", r"/api/editor/chat")
+    def editor_chat(self, m, body, q):
+        """给内嵌编辑器用的模型代理：复用 JDScope 设置里的端点，Key 不出本机进程。"""
+        messages = body.get("messages") or []
+        if not isinstance(messages, list) or not messages:
+            return {"error": "messages 不能为空"}
+        clean = []
+        for msg in messages[:4]:
+            if not isinstance(msg, dict):
+                continue
+            role = str(msg.get("role") or "user")
+            content = str(msg.get("content") or "")
+            if role not in ("system", "user", "assistant") or not content:
+                continue
+            clean.append({"role": role, "content": content[:12000]})
+        if not clean:
+            return {"error": "messages 结构不对"}
+        conn = self._conn()
+        try:
+            cfg = self.settings_dict(conn)
+        finally:
+            conn.close()
+        if not cfg.get("api_key"):
+            return {"error": "尚未配置模型：请到 JDScope「设置」填写 Base URL / API Key / 模型"}
+        try:
+            temperature = float(body.get("temperature", 0.3) or 0.3)
+        except (TypeError, ValueError):
+            temperature = 0.3
+        try:
+            content = llm.chat(
+                cfg,
+                clean,
+                temperature=temperature,
+                timeout=120,
+                extra={"max_tokens": 8192, "response_format": {"type": "json_object"}},
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"{type(exc).__name__}: {exc}"}
+        return {"ok": True, "content": content, "model": cfg.get("model") or ""}
+
+    @route("GET", r"/api/companies/\d+/jd")
+    def company_jd(self, m, body, q):
+        cid = int(m.group(0).split("/")[-2])
+        conn = self._conn()
+        try:
+            return {"text": companies.jd_text(conn, cid)}
         finally:
             conn.close()
 

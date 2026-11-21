@@ -56,6 +56,7 @@ JDScope 只做中间这一层：**决策层**。
 | 可选模型 | OpenAI 兼容端点（默认 DeepSeek），用于改写建议与面试应答口径；不配置也能用 |
 | AI 只出候选 | JD 入库的 AI 解析、改写建议、面试口径都先把条目摆出来，**勾选/点「采用」才入库**；没勾的不参与打分，也不改台账 |
 | 一条龙 | 岗位详情 →「建公司档案 / 改简历」→ 内嵌编辑器（自动带上 JD、策略与基底）→ 导出 HTML 回公司文件夹 |
+| 简历工作台 | 侧栏常驻入口，直接打开 `resumes/_通用简历/` 的母版；不属于任何公司，随时改、随时导出，也是各公司定制版的起点 |
 | 公司档案 | 每家公司一个文件夹：`jd.txt` / `strategy.md` / `resume.json` / `resume.html` / `report.md`，同名自动加序号，删除记录不删文件 |
 | 数据位置可选 | 设置页可把数据库与报告改到任意盘；空目录自动迁移，已有库目录直接接管，不覆盖 |
 
@@ -99,7 +100,7 @@ pip install -r requirements.txt
 location.json  位置指针（只在自定义或改回默认时出现）
 jdscope.db     SQLite（岗位、需求条目、缺口、基底、公司档案、设置）
 reports\       导出的 Markdown 报告
-resumes\       公司档案，一家一个文件夹（简历 / 策略 / JD / 报告）
+resumes\       公司档案，一家一个文件夹（简历 / 策略 / JD / 报告）；_通用简历 为母版
 backups\       预留
 ```
 
@@ -115,18 +116,22 @@ backups\       预留
 
 ## 内嵌编辑器
 
+侧栏「简历工作台」是通用简历（母版）的常驻入口，对应 `resumes/_通用简历/`；它不属于任何岗位，随时可改、可导出，也是各公司定制版的起点。
+
 `app/web/editor/index.html` 是简历编辑器原文件（作者自建的单文件版，HTML/CSS/JS 全内联，无外部依赖）的副本，随仓库分发。JDScope 只加了一层很薄的桥接，不改它的编辑与排版逻辑：
 
 | 时机 | 行为 |
 |---|---|
 | 打开 `?company=<id>` | `STORE_KEY` 加上 `:company-<id>` 命名空间，多家公司的 localStorage 草稿互不覆盖 |
 | 进入页面 | 拉 `/api/companies/<id>/resume` 的 `resume.json`；没有就拉建档时留下的 `base.html`，用编辑器自带的 `parseResumeHtml()` 还原成可编辑结构，然后删掉 `base.html` |
-| 编辑 | 复用编辑器原有的 `save()`（400ms 防抖），额外 900ms 防抖把状态 POST 回公司文件夹；**API Key 只留本机 localStorage，不写盘** |
+| 编辑 | 复用编辑器原有的 `save()`（400ms 防抖），额外 900ms 防抖把状态 POST 回公司文件夹；**API Key 不落盘，也不下发到页面** |
+| AI 对齐 JD | 嵌入模式走同源代理 `POST /api/editor/chat`，服务端直接用「设置」里的 Base URL / 模型 / Key；编辑器不再单独填 Key，公司 `jd.txt` 自动灌进「目标 JD」 |
 | 导出 | 顶栏「保存简历 HTML 到公司档案」把 `exportHtmlSource()` 的成品写到 `resume.html` |
 | 返回 | 顶栏左侧「← JDScope」回岗位台账 |
 
 事实源是 `resume.json`（可继续编辑），`resume.html` 是投递用快照。这样同一份内容既能反复改，也能直接拿去投。
-原编辑器更新时，把它重新复制成 `app/web/editor/index.html`，再按 `STORE_KEY`、`save()`、启动序列、顶栏四处重新打补丁即可。
+通用简历和公司档案用的是同一套桥接：`/editor/?company=<id>` 里的 id 对母版同样成立（母版就是一条 `kind=general` 的档案），所以母版也自动获得回写与导出能力。
+原编辑器更新时，把它重新复制成 `app/web/editor/index.html`，再按 `STORE_KEY`、`save()`、启动序列、顶栏、AI 代理五处重新打补丁即可。
 
 ## 评分口径
 
@@ -156,7 +161,7 @@ powershell -ExecutionPolicy Bypass -File build\build_exe.ps1
 python -m unittest discover -s tests -v
 ```
 
-覆盖词表最长匹配、JD 三段切分、硬性条件判定、基底选型、聚合统计、报告结构、数据目录切换（迁移 / 接管 / 冲突拒绝 / 环境变量锁定 / 指针损坏回退）、公司档案（建档 / 同名加序号 / 简历回写 / 导出 / 删除留档）、AI 候选合并与重算保留、v1 → v2 迁移，以及 HTTP 接口链路。共 52 个用例。
+覆盖词表最长匹配、JD 三段切分、硬性条件判定、基底选型、聚合统计、报告结构、数据目录切换（迁移 / 接管 / 冲突拒绝 / 环境变量锁定 / 指针损坏回退）、公司档案（建档 / 同名加序号 / 简历回写 / 导出 / 删除留档 / 通用母版）、AI 候选合并与重算保留、嵌入编辑器模型代理与 JD 回灌、v1 → v3 迁移，以及 HTTP 接口链路。共 60 个用例。
 
 ## 目录
 

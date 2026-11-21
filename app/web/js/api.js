@@ -62,6 +62,7 @@ export const api = {
   openDataDir: () => request("/api/data-dir/open", { method: "POST", body: {} }),
 
   listCompanies: () => request("/api/companies"),
+  generalResume: () => request("/api/resume/general", { method: "POST", body: {} }),
   createCompany: (payload) => request("/api/companies", { method: "POST", body: payload }),
   getCompany: (id) => request(`/api/companies/${id}`),
   deleteCompany: (id) => request(`/api/companies/${id}`, { method: "DELETE" }),

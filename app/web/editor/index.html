@@ -965,11 +965,12 @@ function renderEditor(){
       <div class="sub-head">
         <span class="sub-title">AI 对齐 JD</span>
         <div class="spacer"></div>
-        <button class="btn sm" id="btnAiCfg">${aiCfgOpen ? '收起设置' : 'API 设置'}</button>
+        ${COMPANY_ID ? '' : `<button class="btn sm" id="btnAiCfg">${aiCfgOpen ? '收起设置' : 'API 设置'}</button>`}
         ${foldBtn('p-ai')}
       </div>
       <div class="panel-body">
-        <div class="ai-grid" id="aiCfg" ${aiCfgOpen ? '' : 'style="display:none"'}>
+        ${COMPANY_ID ? `<div class="ai-note" style="margin-top:0">模型端点与 API Key 直接使用 JDScope「设置」页里的配置，这里不用再填。<a href="/?view=settings">去 JDScope 设置</a>（改完回来即可，不需要重填 Key）</div>` : ''}
+        <div class="ai-grid" id="aiCfg" ${COMPANY_ID ? 'style="display:none"' : (aiCfgOpen ? '' : 'style="display:none"')}>
           <div class="f"><label>Base URL（OpenAI 兼容端点）</label>
             <input data-path="ai.baseUrl" value="${esc(A.baseUrl)}"></div>
           <div class="f"><label>模型</label>
@@ -1399,7 +1400,8 @@ function sanitizeChanges(raw, fields){
 
 async function runAi(scope){
   const cfg = state.ai;
-  if(!cfg.key || !cfg.key.trim()){ toast('先填 API Key（点右上角「API 设置」）'); aiCfgOpen = true; renderEditor(); return; }
+  const viaApp = !!COMPANY_ID;   // 嵌入 JDScope 时走本地代理，复用 App 设置里的端点与 Key
+  if(!viaApp && (!cfg.key || !cfg.key.trim())){ toast('先填 API Key（点右上角「API 设置」）'); aiCfgOpen = true; renderEditor(); return; }
   if(!cfg.jd || !cfg.jd.trim()){ toast('先把 JD 粘进来'); return; }
 
   const fields = collectFields(scope);
@@ -1423,23 +1425,35 @@ async function runAi(scope){
   if(box) box.innerHTML = '<div class="ai-note">正在请求模型，请稍候…</div>';
 
   try{
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + cfg.key.trim()
-      },
-      body: JSON.stringify({
-        model: (cfg.model || 'deepseek-chat').trim() || 'deepseek-chat',
-        messages: [
-          { role: 'system', content: activeSystemPrompt() },
-          { role: 'user', content: userMsg }
-        ],
-        temperature: 0.3,
-        max_tokens: 8192,
-        response_format: { type: 'json_object' }
-      })
-    });
+    const res = viaApp
+      ? await fetch('/api/editor/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: [
+              { role: 'system', content: activeSystemPrompt() },
+              { role: 'user', content: userMsg }
+            ],
+            temperature: 0.3
+          })
+        })
+      : await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + cfg.key.trim()
+          },
+          body: JSON.stringify({
+            model: (cfg.model || 'deepseek-chat').trim() || 'deepseek-chat',
+            messages: [
+              { role: 'system', content: activeSystemPrompt() },
+              { role: 'user', content: userMsg }
+            ],
+            temperature: 0.3,
+            max_tokens: 8192,
+            response_format: { type: 'json_object' }
+          })
+        });
 
     if(!res.ok){
       let hint = 'HTTP ' + res.status;
@@ -1449,13 +1463,18 @@ async function runAi(scope){
       else if(res.status === 404) hint = '端点不存在，检查 Base URL（404）';
       else if(res.status >= 500) hint = '服务端异常（' + res.status + '）';
       let detail = '';
-      try{ const e = await res.json(); detail = (e && e.error && e.error.message) || ''; }catch(_){}
-      throw new Error(hint + (detail ? '：' + detail : ''));
+      try{
+        const e = await res.json();
+        detail = typeof e.error === 'string' ? e.error : ((e && e.error && e.error.message) || '');
+      }catch(_){}
+      if(viaApp && detail) hint = detail;
+      throw new Error(hint + (!viaApp && detail ? '：' + detail : ''));
     }
 
     const data = await res.json();
-    const content = data && data.choices && data.choices[0]
-      && data.choices[0].message && data.choices[0].message.content;
+    if(data && data.error && typeof data.error === 'string') throw new Error(data.error);
+    const content = viaApp ? (data && data.content) : (data && data.choices && data.choices[0]
+      && data.choices[0].message && data.choices[0].message.content);
     if(!content) throw new Error('返回内容为空');
 
     const parsed = parseAiJson(content);
@@ -3085,6 +3104,16 @@ applyZoom();
     }catch(e){}
   }
 
+  /* 公司档案里的 JD 原文直接灌进「目标 JD」，AI 对齐不用再粘一遍。
+     必须在下面 renderEditor 之前填好，否则设置面板会一直显示空占位。 */
+  let companyJd = '';
+  try{
+    const r = await fetch('/api/companies/' + COMPANY_ID + '/jd', { cache:'no-store' });
+    const j = await r.json().catch(()=> null);
+    companyJd = (j && j.text) || '';
+  }catch(e){}
+  if(companyJd && !String(state.ai.jd || '').trim()) state.ai.jd = companyJd;
+
   if(loaded){
     localStorage.setItem(STORE_KEY, JSON.stringify(state));
     renderEditor(); applyLayout(); renderPreview(); checkOverflow(); applyZoom();
@@ -3098,8 +3127,10 @@ applyZoom();
   }else if(parseFailed){
     setSyncState('基底 HTML 没认出模块：请用顶栏「导入 HTML」手动导入', 'err');
     toast('基底 HTML 结构不标准，没能自动解析；可手动「导入 HTML」');
+    renderEditor();
   }else{
     setSyncState('新档案：从空白开始，改动自动写回', 'ok');
+    renderEditor();
     save();
   }
 

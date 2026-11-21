@@ -132,12 +132,17 @@ export const Companies = {
           <tbody>
             <tr v-for="c in (s.companies || [])" :key="c.id">
               <td>
-                <div class="strong">{{ c.name }}</div>
+                <div class="strong">{{ c.name }}
+                  <span class="badge plain" v-if="c.kind === 'general'">通用</span>
+                </div>
                 <div class="hint mono">{{ c.folder }}</div>
               </td>
               <td>
-                <div>{{ c.job_title || '—' }}</div>
-                <div class="hint" v-if="c.job_company">{{ c.job_company }}</div>
+                <div class="hint" v-if="c.kind === 'general'">母版 · 不属于任何公司</div>
+                <template v-else>
+                  <div>{{ c.job_title || '—' }}</div>
+                  <div class="hint" v-if="c.job_company">{{ c.job_company }}</div>
+                </template>
               </td>
               <td>
                 <div class="row-gap">
@@ -159,7 +164,7 @@ export const Companies = {
                   <button class="mini" @click="openEditor(c.id)">打开编辑器</button>
                   <button class="mini" @click="editStrategy(c)">策略</button>
                   <button class="mini" @click="openFolder(c)">文件夹</button>
-                  <button class="mini" @click="remove(c)">删除记录</button>
+                  <button class="mini" v-if="c.kind !== 'general'" @click="remove(c)">删除记录</button>
                 </div>
               </td>
             </tr>

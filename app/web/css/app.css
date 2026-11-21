@@ -124,11 +124,17 @@ a { color: var(--accent); }
 }
 
 /* ---------------- 主区 ---------------- */
+/* 宽度跟着窗口走：主区吃掉侧栏之外的全部空间，不再用 max-width 卡在 1320 */
 .main {
   margin-left: var(--rail-w);
   padding: 22px 26px 60px;
-  max-width: 1320px;
+  max-width: none;
+  min-width: 0;
+  min-height: calc(100vh - var(--top-h));
+  display: flex;
+  flex-direction: column;
 }
+.main > * { width: 100%; min-width: 0; }
 
 .view-head { margin-bottom: 16px; }
 .view-head h1 { margin: 0 0 4px; font-size: 21px; letter-spacing: -.01em; font-weight: 650; }
@@ -151,10 +157,10 @@ a { color: var(--accent); }
 .panel-head .hint { margin-left: auto; }
 .panel .scroll-y { max-height: 340px; overflow: auto; padding: 0 18px 14px; }
 
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
 
-.cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .stat {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 14px 16px; box-shadow: var(--shadow-sm);
@@ -388,8 +394,10 @@ pre.raw {
 
 /* ---------------- 窄窗口 ---------------- */
 @media (max-width: 1120px) {
-  .cards { grid-template-columns: repeat(3, 1fr); }
+  .cards { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
   .grid2, .grid3 { grid-template-columns: 1fr; }
+  .form-grid.three { grid-template-columns: repeat(2, 1fr); }
+  .field.span2 { grid-column: span 2; }
 }
 @media (max-width: 900px) {
   :root { --rail-w: 0px; }

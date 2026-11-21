@@ -150,6 +150,12 @@ export function openEditor(id) {
   location.href = `/editor/?company=${id}`;
 }
 
+/* 通用简历：固定一份母版，第一次点入口时自动建档 */
+export async function openGeneral() {
+  const res = await api.generalResume();
+  openEditor(res.company.id);
+}
+
 export async function openJob(id) {
   state.detailLoading = true;
   try {

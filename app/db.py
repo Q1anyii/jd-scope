@@ -12,12 +12,13 @@ from pathlib import Path
 
 from .config import db_path, ensure_dirs
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # v2 相对 v1 的增量：老库启动时按列补齐，不重建、不清数据
 COLUMN_PATCHES = (
     ("bases", "kind", "kind TEXT DEFAULT 'html'"),
     ("requirements", "source", "source TEXT DEFAULT 'rule'"),
+    ("companies", "kind", "kind TEXT DEFAULT 'company'"),
 )
 
 DDL = """
@@ -124,6 +125,7 @@ CREATE TABLE IF NOT EXISTS companies (
     job_id INTEGER,
     base_id INTEGER,
     status TEXT DEFAULT 'draft',
+    kind TEXT DEFAULT 'company',
     note TEXT DEFAULT '',
     created_at TEXT DEFAULT '',
     updated_at TEXT DEFAULT ''

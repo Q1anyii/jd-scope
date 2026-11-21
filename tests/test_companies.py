@@ -60,6 +60,35 @@ class CompanyBase(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
 
+class TestGeneralResume(CompanyBase):
+    def test_ensure_general_is_idempotent(self):
+        first = companies.ensure_general(self.conn)
+        second = companies.ensure_general(self.conn)
+        self.assertEqual(first["id"], second["id"])
+        self.assertEqual(first["kind"], "general")
+        self.assertEqual(first["name"], "通用简历")
+        root = Path(self._tmp) / "config" / "resumes" / first["folder"]
+        self.assertTrue((root / "strategy.md").exists())
+        self.assertIn("母版", (root / "strategy.md").read_text(encoding="utf-8"))
+
+    def test_general_listed_first_and_undeletable(self):
+        companies.create(self.conn, "普通公司", self.job_id, None)
+        general = companies.ensure_general(self.conn)
+        items = companies.list_all(self.conn)
+        self.assertEqual(items[0]["id"], general["id"])
+        out = companies.delete_record(self.conn, general["id"])
+        self.assertIn("error", out)
+        self.assertIn("不能删除", out["error"])
+
+    def test_general_adopts_existing_folder(self):
+        root = Path(self._tmp) / "config" / "resumes" / companies.GENERAL_FOLDER
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "resume.json").write_text('{"meta":{},"modules":{}}', encoding="utf-8")
+        item = companies.ensure_general(self.conn)
+        self.assertEqual(item["folder"], companies.GENERAL_FOLDER)
+        self.assertTrue(item["files"]["resume"])
+
+
 class TestCompanyFiles(CompanyBase):
     def test_detect_base_kind(self):
         self.assertEqual(companies.detect_kind("<h1>x</h1>"), "html")
@@ -149,6 +178,14 @@ class TestApiCompanies(CompanyBase):
         except urllib.error.HTTPError as exc:
             return json.loads(exc.read().decode("utf-8"))
 
+    def test_general_resume_endpoint(self):
+        first = self.call("/api/resume/general", "POST", {})
+        second = self.call("/api/resume/general", "POST", {})
+        self.assertTrue(first["ok"])
+        self.assertEqual(first["company"]["id"], second["company"]["id"])
+        self.assertEqual(first["company"]["kind"], "general")
+        self.assertEqual(self.call("/api/companies")["items"][0]["kind"], "general")
+
     def test_company_lifecycle(self):
         created = self.call("/api/companies", "POST", {"job_id": 1, "base_id": 1})
         cid = created["company"]["id"]
@@ -208,7 +245,8 @@ class TestSchemaMigration(unittest.TestCase):
             self.assertIn("companies", {r["name"] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'")})
             version = conn.execute("SELECT v FROM meta WHERE k='schema_version'").fetchone()["v"]
-            self.assertEqual(version, "2")
+            self.assertEqual(version, "3")
+            self.assertIn("kind", db._columns(conn, "companies"))
             row = conn.execute("SELECT kind FROM bases WHERE code='old'").fetchone()
             self.assertEqual(row["kind"], "html")
             row = conn.execute("SELECT source FROM requirements WHERE job_id=1").fetchone()

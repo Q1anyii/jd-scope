@@ -59,8 +59,44 @@ base.html       HTML 基底原文，编辑器首次导入后删除
 4. 公司页操作列 4 个按钮在 `flex-wrap: wrap` 的容器里被压成竖排；新增 `.actions`（`flex-wrap: nowrap`）修正。
 5. 无头 Chrome 复用已有实例时 `--dump-dom` 会静默返回空；必须带独立的 `--user-data-dir`。
 
+## 5. 补充：通用简历工作台入口
+
+反馈很直接：编辑器原先只能从岗位详情进，等于被藏起来了。
+
+- 侧栏新增常驻「简历工作台」，点击即打开通用简历母版；不再需要先找一条岗位。
+- 通用简历不是内存里的临时草稿，而是 `resumes/_通用简历/` 的独立档案：`resume.json` / `resume.html` / `strategy.md`。
+- 数据模型：`companies.kind` 增 `general`（schema v3），母版在列表里置顶、带「通用」标；`POST /api/resume/general` 幂等，第一次自动建档，之后直接返回同一条。
+- 删除保护：通用简历是母版，接口层拒绝删除记录；公司记录仍然「删记录、留文件夹」。
+- 复用同一套编辑器桥接：`?company=<id>` 对母版一样成立，回写 / 导出 HTML 无需第二套代码。
+- 文件夹优先复用已存在的 `_通用简历`（数据库丢了也能接管旧文件），没有才新建。
+- 测试补 4 个：幂等、置顶且不可删、接管已有文件夹、HTTP 入口；总计 **56 用例全绿**。
+
+## 6. 补充：编辑器 AI 接管 App 设置 + 页面宽度
+
+第二条反馈：编辑器里还要另填一遍 API Key，而且主界面宽屏不跟着放大。
+
+**AI 对齐 JD 不再单独配一套**
+
+- 没有推倒重写编辑器：排版、分页、导出这些成熟逻辑重写风险大，桥接一层就够。
+- 新增 `POST /api/editor/chat`：编辑器只发 `messages`，服务端从「设置」里取 `base_url` / `model` / `api_key` 调 `llm.chat()`，顺手补 `max_tokens` 与 `response_format=json_object`。
+- Key 不进浏览器：嵌入模式不读编辑器的 `state.ai.key`，也不把 Key 写进页面；独立打开编辑器时仍保留原来的直连模式。
+- 嵌入模式隐藏「API 设置」按钮和三个端点输入，只留一行只读提示 + 回设置页链接。
+- 公司 `jd.txt` 在 bootstrap 时自动灌进「目标 JD」，省去从岗位详情复制一遍。
+
+**布局**
+
+- 根因不是 flex 写错，而是 `.main { max-width: 1320px }`：窗口放大时被钳住，缩小反而正常。
+- 改为 `max-width: none` + flex column，主区吃掉侧栏外的全部宽度；`.cards` / `.grid2` / `.grid3` 换 `auto-fit + minmax`，窄屏媒体查询保留。
+- 1920×1080 截图确认：概览 5 张统计卡铺满、公司表格贴右，无右侧大片留白。
+
+**踩到的坑**
+
+6. JD 预灌最初放在 `if(loaded)` 渲染之后，`state.ai.jd` 有值但设置面板已画完，输入框仍显示空占位；改为在 `renderEditor()` 之前赋值，空白档案分支补一次 `renderEditor()`。
+7. 代理错误里 `error` 是字符串而不是 OpenAI 的 `{error:{message}}`，前端取值要兼容两种形状，否则只显示「HTTP 400」。
+
 ## 验收
 
-- `python -m unittest discover -s tests`：**52 用例全绿**（新增 15：公司档案文件/接口/v2 迁移、AI 条目收敛与重算保留）。
-- 端到端实测：HTML 基底 → 建档 → 打开编辑器 → 自动解析出 2 个模块（姓名「张三」）→ `resume.json` 落盘 3555B → `base.html` 已删除。
-- 截图：`docs/ui-companies.png`、`docs/ui-editor.png`。
+- `python -m unittest discover -s tests`：**60 用例全绿**（新增 4：代理无 Key 拒绝、代理读 App 设置、非法 messages、公司 JD 回灌）。
+- 本地 stub 模型端到端：`POST /api/settings` 指向 `127.0.0.1:8899/v1` → `POST /api/editor/chat` 返回 `{"ok":true,"content":"{\"changes\": []}"}`。
+- 早前端到端实测：HTML 基底 → 建档 → 打开编辑器 → 自动解析出 2 个模块（姓名「张三」）→ `resume.json` 落盘 3555B → `base.html` 已删除。
+- 截图：`docs/ui-companies.png`、`docs/ui-editor.png`；另以 1920×1080 检查宽屏铺满。

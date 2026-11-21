@@ -44,7 +44,8 @@ def _post(url: str, payload: dict, api_key: str, timeout: int = 60) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def chat(cfg: dict, messages: list[dict], temperature: float = 0.3, timeout: int = 60) -> str:
+def chat(cfg: dict, messages: list[dict], temperature: float = 0.3, timeout: int = 60,
+         extra: dict | None = None) -> str:
     base_url = (cfg.get("base_url") or "").rstrip("/")
     api_key = cfg.get("api_key") or ""
     model = cfg.get("model") or ""
@@ -57,6 +58,8 @@ def chat(cfg: dict, messages: list[dict], temperature: float = 0.3, timeout: int
         "temperature": temperature,
         "stream": False,
     }
+    if extra:
+        payload.update(extra)
     resp = _post(url, payload, api_key, timeout)
     choices = resp.get("choices") or []
     if not choices:

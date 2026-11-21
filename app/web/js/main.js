@@ -1,7 +1,8 @@
 /* 根组件：顶栏、侧栏、页面切换、提示堆叠。 */
 
 import {
-  state, toast, loadHealth, loadBoot, loadStats, loadDataDir, loadJobs, loadGaps, loadBases, loadCompanies, refreshCurrent,
+  state, toast, loadHealth, loadBoot, loadStats, loadDataDir, loadJobs, loadGaps, loadBases, loadCompanies,
+  openGeneral, refreshCurrent,
 } from "./store.js";
 import { Dashboard } from "./pages/dashboard.js";
 import { Intake } from "./pages/intake.js";
@@ -21,6 +22,7 @@ const NAV = [
   { key: "gaps", label: "缺口库", counter: "gaps" },
   { key: "bases", label: "基底库", counter: "bases" },
   { key: "companies", label: "公司档案" },
+  { key: "resume", label: "简历工作台" },
   { key: "profile", label: "档案" },
   { key: "settings", label: "设置" },
 ];
@@ -55,6 +57,11 @@ const App = {
     });
 
     const go = (key) => {
+      // 简历工作台不是一个页面，而是「打开通用简历母版」的入口
+      if (key === "resume") {
+        openGeneral().catch((e) => toast(e.message, "err"));
+        return;
+      }
       if (key === s.view && key !== "dash") return;
       s.view = key;
       if (key !== "jobs") s.detail = null;

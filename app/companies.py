@@ -173,7 +173,8 @@ def detect_kind(content: str) -> str:
     return "json" if isinstance(data, dict) and isinstance(data.get("modules"), dict) else "html"
 
 
-def create(conn, name: str, job_id: int | None = None, base_id: int | None = None) -> dict:
+def create(conn, name: str, job_id: int | None = None, base_id: int | None = None,
+           kind: str = "company") -> dict:
     """建公司档案：写文件夹 + 落库；同名自动加序号，绝不覆盖已有目录。"""
     job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id or -1,)).fetchone()
     if not name:
@@ -196,14 +197,15 @@ def create(conn, name: str, job_id: int | None = None, base_id: int | None = Non
     _write(root / "report.md", _report(conn, name, job, base_label))
 
     cur = conn.execute(
-        "INSERT INTO companies(name, folder, job_id, base_id, status, note, created_at, updated_at)"
-        " VALUES(?,?,?,?,?,?,?,?)",
+        "INSERT INTO companies(name, folder, job_id, base_id, status, kind, note, created_at, updated_at)"
+        " VALUES(?,?,?,?,?,?,?,?,?)",
         (
             name,
             folder,
             job["id"] if job else None,
             base["id"] if base else None,
             "draft",
+            kind,
             "",
             db.now(),
             db.now(),
@@ -246,8 +248,65 @@ def detail(conn, cid: int) -> dict:
     return item
 
 
+GENERAL_NAME = "通用简历"
+GENERAL_FOLDER = "_通用简历"
+
+
+def _general_strategy() -> str:
+    return """# 通用简历（母版）
+
+这份简历不属于任何一家公司，只做两件事：
+
+1. 记录真实、可复用的经历与事实；
+2. 作为各公司定制版的起点（进公司档案后再按 JD 改）。
+
+## 维护原则
+
+- 只写发生过的事实，不写期望；
+- 一页为限，与目标岗位最相关的经历放前面；
+- 量化结果用真实数字，没有数字就不编。
+
+## 投递前检查
+
+- [ ] 联系方式可用
+- [ ] 时间线无空档，或有可解释的说法
+- [ ] 导出 HTML 后逐页检查不溢出
+"""
+
+
+def ensure_general(conn) -> dict:
+    """通用简历固定一份：没有就建，有就返回；文件夹优先复用已有的 _通用简历。"""
+    row = conn.execute(
+        "SELECT * FROM companies WHERE kind='general' ORDER BY id LIMIT 1"
+    ).fetchone()
+    if row is not None:
+        root = folder_of(row)
+        if not root.exists():
+            root.mkdir(parents=True, exist_ok=True)
+        if not (root / "strategy.md").exists():
+            _write(root / "strategy.md", _general_strategy())
+        return detail(conn, row["id"])
+
+    preferred = resumes_root() / GENERAL_FOLDER
+    folder = GENERAL_FOLDER if preferred.exists() else _unique_folder(resumes_root(), GENERAL_FOLDER)
+    root = resumes_root() / folder
+    root.mkdir(parents=True, exist_ok=True)
+    if not (root / "strategy.md").exists():
+        _write(root / "strategy.md", _general_strategy())
+    cur = conn.execute(
+        "INSERT INTO companies(name, folder, job_id, base_id, status, kind, note, created_at, updated_at)"
+        " VALUES(?,?,?,?,?,?,?,?,?)",
+        (GENERAL_NAME, folder, None, None, "draft", "general", "通用简历母版", db.now(), db.now()),
+    )
+    conn.commit()
+    return detail(conn, cur.lastrowid)
+
+
 def list_all(conn) -> list[dict]:
-    rows = conn.execute("SELECT * FROM companies ORDER BY updated_at DESC, id DESC").fetchall()
+    rows = conn.execute(
+        "SELECT * FROM companies ORDER BY CASE kind WHEN 'general' THEN 0 ELSE 1 END,"
+        " updated_at DESC, id DESC"
+    ).fetchall()
     return [detail(conn, r["id"]) for r in rows]
 
 
@@ -311,6 +370,11 @@ def base_html(conn, cid: int) -> str:
     return _read(folder_of(row) / "base.html") if row else ""
 
 
+def jd_text(conn, cid: int) -> str:
+    row = conn.execute("SELECT folder FROM companies WHERE id=?", (cid,)).fetchone()
+    return _read(folder_of(row) / "jd.txt") if row else ""
+
+
 def open_folder(conn, cid: int) -> dict:
     row = conn.execute("SELECT folder FROM companies WHERE id=?", (cid,)).fetchone()
     if row is None:
@@ -329,9 +393,11 @@ def open_folder(conn, cid: int) -> dict:
 
 def delete_record(conn, cid: int) -> dict:
     """只删数据库记录，文件夹原样留在磁盘上（简历是资产，不跟着记录一起消失）。"""
-    row = conn.execute("SELECT folder FROM companies WHERE id=?", (cid,)).fetchone()
+    row = conn.execute("SELECT folder, kind FROM companies WHERE id=?", (cid,)).fetchone()
     if row is None:
         return {"error": "公司档案不存在"}
+    if (row["kind"] or "company") == "general":
+        return {"error": "通用简历是母版，不能删除"}
     conn.execute("DELETE FROM companies WHERE id=?", (cid,))
     conn.commit()
     return {"ok": True, "folder": row["folder"], "kept": True}
