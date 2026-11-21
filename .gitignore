@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# PyInstaller
+dist/
+build/pyinstaller/
+build/JDScope.spec
+*.manifest
+
+# 本地数据与临时产物
+*.db
+*.db-wal
+*.db-shm
+.tmp*
+*.log
+.env
+
+# 编辑器
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
