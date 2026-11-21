@@ -368,6 +368,10 @@ body.printing #page h3,body.printing #page h3:hover{background:transparent!impor
 .modal-wrap{position:relative;overflow:hidden;flex:0 0 auto}
 .modal-wrap .page{position:absolute;left:0;top:0;transform-origin:top left;margin:0;
   box-shadow:0 18px 40px -18px rgba(28,32,64,.3),0 0 0 1px rgba(28,32,64,.05)}
+/* 预览里的分页虚线：每 297mm 一条，和最终 PDF 的切片位置一致 */
+#pdfModalPage.show-guides{background-image:repeating-linear-gradient(to bottom,
+  transparent 0,transparent calc(297mm - 1px),
+  rgba(196,58,58,.55) calc(297mm - 1px),rgba(196,58,58,.55) 297mm)}
 .modal-foot{display:flex;align-items:center;gap:10px;padding:13px 18px;border-top:1px solid var(--line);background:var(--card)}
 .modal-tip{flex:1;font-size:12px;color:var(--sub);line-height:1.6}
 
@@ -439,8 +443,7 @@ body.printing #page h3,body.printing #page h3:hover{background:transparent!impor
   <button class="btn" id="btnImportHtml" title="读取已有简历 HTML，解析成可编辑的模块">导入 HTML</button>
   <input type="file" id="fileHtml" class="file-input" accept=".html,.htm,text/html">
   <button class="btn" id="btnExportHtml" title="导出一份干净的简历 HTML：可直接打开、可投递，也能再被本工具导入">导出 HTML</button>
-  <button class="btn" id="btnImgPdf" title="用系统打印输出矢量 PDF（文字可选中、可被 ATS 解析）；边距务必选「无」">打印 · 矢量</button>
-  <button class="btn primary" id="btnPdf" title="先大窗预览，确认后直接生成 PDF 文件（不弹打印窗口）">导出 PDF</button>
+  <button class="btn primary" id="btnPdf" title="先预览整页与分页位置，确认后直接生成 PDF 文件（不弹系统打印）">导出 PDF</button>
 </div>
 
 <!-- 嵌入 JDScope 时显示：公司名 / 回写状态 / 回主页 -->
@@ -466,7 +469,7 @@ body.printing #page h3,body.printing #page h3:hover{background:transparent!impor
       </div>
     </div>
     <div class="modal-foot">
-      <span class="modal-tip">确认后直接生成 PDF 文件（约 240dpi），不弹打印窗口；这份是位图，文字不可选中。需要可被 ATS 解析的矢量版，用「打印 · 矢量」。</span>
+      <span class="modal-tip" id="pdfModalTip">确认后按 A4 分页生成 PDF 文件（约 240dpi）；预览里的红色虚线就是分页位置。</span>
       <button class="btn ghost" id="pdfCancel">取消</button>
       <button class="btn primary" id="pdfConfirm">确认导出 PDF</button>
     </div>
@@ -1096,9 +1099,8 @@ function renderEditor(){
       内容会自动存到本机浏览器，关掉再打开还在。<br>
       <b>自定义加粗</b>：任何多行内容里选中一段字，点右侧 <b>B</b> 按钮即加粗；也可以手写 <b>**文字**</b>。预览、PDF 导出、截图都按加粗显示。<br>
       <b>AI 对齐 JD</b>：填 Base URL / 模型 / Key，粘贴 JD，点「生成修改建议」，逐条采用即可。建议列表在框内滚动，不会把面板撑长。Key 只存在这台电脑，请求直连你填的端点，不经中转；<b>导出配置不含 Key</b>。<br>
-      <b>导出 HTML</b>：把当前内容存成一份干净的简历网页——样式按当前字号 / 行距 / 主题一起写进去，双击就能看、可以直接当附件发；日后用「导入 HTML」还能读回来接着改。<br>
-      <b>导出 PDF</b>：点右上角按钮 → 先弹大窗口看整页效果，确认后直接生成 PDF 文件（约 240dpi，不弹打印窗口）。<br>
-      <b>打印 · 矢量</b>：要文字可选中、能被 ATS 解析的版本 → 打印窗口里「目标」选 <b>另存为 PDF</b>、纸张 A4、边距「无」。<br>
+      <b>导出 HTML</b>：把当前内容存成一份干净的简历网页——样式按当前字号 / 行距 / 主题一起写进去，双击就能看、可以直接当附件发；日后用「导入 HTML」还能读回来接着改。嵌入公司档案时，这个按钮会隐藏，统一用公司条右侧「保存简历 HTML 到公司档案」。<br>
+      <b>导出 PDF</b>：点右上角「导出 PDF」→ 大窗口预览整页，红色虚线标出 A4 分页位置；确认后按分页直接生成 PDF 文件（约 240dpi，不弹系统打印窗口）。从公司档案进入编辑器时，导出的 PDF 会同时归档为公司文件夹里的 <b>resume.pdf</b>（已有同名文件则跳过，不覆盖）。<br>
       右侧顶部若显示 <b>「超出 1 页」</b>，说明撑破了 A4，需精简几条 bullet 或换「紧凑」预设。
     </div>
   `);
@@ -2160,22 +2162,31 @@ function syncLabels(){
 }
 
 /* 超页检测：临时去掉 min-height，量出内容真实高度 */
+const A4_PAGE_PX = 297 / 25.4 * 96;              // ≈ 1122.5px
+function measurePageHeight(el){
+  const prev = el.style.minHeight;
+  el.classList.add('measuring');                   /* 侧栏「撑满一页」的写法此时要让开 */
+  el.style.minHeight = '0px';
+  const h = el.offsetHeight;
+  el.style.minHeight = prev;
+  el.classList.remove('measuring');
+  return h;
+}
+function pdfPageCount(h){
+  /* 和 PDF 导出的容差一致：超出 2px 以内仍按单页，避免一像素溢出切出第二页 */
+  return h <= A4_PAGE_PX + 2 ? 1 : Math.ceil(h / A4_PAGE_PX);
+}
+
 function checkOverflow(){
-  const A4_PX = 297 / 25.4 * 96;                  // ≈ 1122.5px
-  const prev = pageEl.style.minHeight;
-  pageEl.classList.add('measuring');              /* 侧栏「撑满一页」的写法此时要让开 */
-  pageEl.style.minHeight = '0px';
-  const h = pageEl.offsetHeight;
-  pageEl.style.minHeight = prev;
-  pageEl.classList.remove('measuring');
+  const h = measurePageHeight(pageEl);
   const el = document.getElementById('pageState');
-  if(h > A4_PX + 2){
-    const over = Math.round((h - A4_PX) / 96 * 72);
+  if(h > A4_PAGE_PX + 2){
+    const over = Math.round((h - A4_PAGE_PX) / 96 * 72);
     el.className = 'warn';
     el.textContent = '超出 1 页约 ' + over + 'pt，请精简';
   } else {
     el.className = 'ok';
-    el.textContent = '单页 · 余 ' + Math.round((A4_PX - h) / 96 * 72) + 'pt';
+    el.textContent = '单页 · 余 ' + Math.round((A4_PAGE_PX - h) / 96 * 72) + 'pt';
   }
 }
 
@@ -2594,20 +2605,11 @@ function exportHtml(){
    否则底色会被打印/截图写进 PDF（曾出现整页淡紫底） */
 function lockPageHover(on){ document.body.classList.toggle('printing', !!on); }
 
-/* 打印路径：系统打印 → 矢量 PDF（文字可选中、可被 ATS 解析） */
-function exportPdf(){
-  syncDocTitle();          /* 「另存为 PDF」的默认文件名取自文档标题，打印前再兜一次 */
-  toast('打印窗口已打开：目标「另存为 PDF」 · 纸张 A4 · 边距「无」 · 缩放保持默认；技术栈底条已强制打印，不用勾「背景图形」');
-  lockPageHover(true);
-  window.addEventListener('afterprint', ()=> lockPageHover(false), { once:true });
-  /* 打印对话框关闭后兜底解锁：个别环境不派发 afterprint */
-  setTimeout(()=>{ window.print(); setTimeout(()=> lockPageHover(false), 600); }, 340);
-}
-
-/* ============ 导出前预览：大窗口确认，再生成 PDF ============ */
+/* 导出前预览：内置 PDF 是唯一导出路径，不再走系统打印对话框 */
 const pdfModalEl = document.getElementById('pdfModal');
 const pdfModalPageEl = document.getElementById('pdfModalPage');
 const pdfModalWrapEl = document.getElementById('pdfModalWrap');
+let pdfPreviewPages = 1;
 
 function fitPdfPreview(){
   if(pdfModalEl.hidden) return;
@@ -2616,7 +2618,10 @@ function fitPdfPreview(){
   const ph = pdfModalPageEl.offsetHeight || 1122;
   const availW = Math.max(240, stage.clientWidth - 36);
   const availH = Math.max(240, stage.clientHeight - 36);
-  const s = Math.min(availW / pw, availH / ph, 1.8);
+  /* 多页时按宽度铺满、允许竖向滚动：把整张两页高纸缩成一条，看不清分页位置 */
+  const s = pdfPreviewPages > 1
+    ? Math.min(availW / pw, 1.25)
+    : Math.min(availW / pw, availH / ph, 1.8);
   pdfModalPageEl.style.transform = 'scale(' + s + ')';
   pdfModalWrapEl.style.width = Math.round(pw * s) + 'px';
   pdfModalWrapEl.style.height = Math.round(ph * s) + 'px';
@@ -2630,15 +2635,27 @@ function openPdfPreview(){
   /* 预览用的是一份克隆：尺寸、字号、主题变量、版式 class 都照搬右侧 A4，改不到真实页面 */
   pdfModalPageEl.innerHTML = pageEl.innerHTML;
   pdfModalPageEl.className = pageEl.className;             /* tpl-* 版式跟着走 */
+  pdfModalPageEl.classList.add('show-guides');
   PAGE_VARS.forEach(v=>{
     const val = pageEl.style.getPropertyValue(v);
     if(val) pdfModalPageEl.style.setProperty(v, val);
   });
+  /* 必须先显示弹窗再测量：hidden 状态下 offsetHeight=0，会把多页误判成单页 */
+  pdfModalEl.hidden = false;
+  const contentH = measurePageHeight(pdfModalPageEl);
+  pdfPreviewPages = pdfPageCount(contentH);
   const st = document.getElementById('pdfModalState');
   const src = document.getElementById('pageState');
-  st.textContent = src ? src.textContent : '单页';
-  st.className = 'st' + (src && src.classList.contains('ok') ? '' : ' bad');
-  pdfModalEl.hidden = false;
+  st.textContent = pdfPreviewPages > 1
+    ? '共 ' + pdfPreviewPages + ' 页 · 按 A4 分页'
+    : (src ? src.textContent : '单页');
+  st.className = 'st' + (pdfPreviewPages > 1 || (src && !src.classList.contains('ok')) ? ' bad' : '');
+  const tip = document.getElementById('pdfModalTip');
+  if(tip){
+    tip.textContent = pdfPreviewPages > 1
+      ? '确认后按 A4 切成 ' + pdfPreviewPages + ' 页生成 PDF（约 240dpi）；红色虚线就是切页位置，可先返回精简内容。'
+      : '确认后生成单页 A4 PDF（约 240dpi），不再弹系统打印窗口。';
+  }
   fitPdfPreview();
 }
 
@@ -2655,8 +2672,9 @@ function buildExportBox(){
   stage.style.cssText = 'background:#ffffff;margin:0;padding:0';
   const box = document.createElement('div');
   box.className = pageEl.className || 'page';   /* 带上 tpl-*，位图 PDF 才和预览同一版式 */
-  /* 高度取 1122px（略小于 297mm=1122.5px），否则按宽铺满 A4 时会溢出半像素、多出一张空白页 */
-  box.style.cssText = 'transform:none;box-shadow:none;margin:0;height:1122px;min-height:0;overflow:hidden';
+  /* 高度交给内容：单页时由 min-height 撑到 1122px，多页时保持完整内容后再按 A4 切片。
+     之前写死 height:1122px + overflow:hidden 会把超出的第二页内容直接裁掉。 */
+  box.style.cssText = 'transform:none;box-shadow:none;margin:0;min-height:1122px;height:auto;overflow:visible';
   /* 把页面上的排版与主题变量带过来，否则新盒子用的是 CSS 默认值 */
   PAGE_VARS.forEach(v=>{
     const val = pageEl.style.getPropertyValue(v);
@@ -2686,15 +2704,46 @@ function buildExportBox(){
   return { stage, box, restore };
 }
 
+async function openCompanyFolder(){
+  if(!COMPANY_ID) return;
+  try{
+    const r = await fetch('/api/companies/' + COMPANY_ID + '/open', { method:'POST' });
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok || j.error) toast('打不开文件夹：' + (j.error || ('HTTP ' + r.status)));
+  }catch(e){
+    toast('打不开文件夹：' + e.message);
+  }
+}
+
+/* 把 jsPDF 的 Blob 变成 base64，交给本地服务写进公司文件夹（不覆盖已有 resume.pdf） */
+function blobToBase64(blob){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=> resolve(String(reader.result || '').split(',')[1] || '');
+    reader.onerror = ()=> reject(reader.error || new Error('读取 PDF 失败'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function archiveCompanyPdf(pdf){
+  if(!COMPANY_ID) return null;
+  const blob = pdf.output('blob');
+  const pdfB64 = await blobToBase64(blob);
+  const r = await fetch('/api/companies/' + COMPANY_ID + '/pdf', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ pdf: pdfB64 })
+  });
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+
 /* 主路径：先大窗预览，确认后直接生成 PDF 文件（不弹打印窗口）。
    自己拼 html2canvas + jsPDF，不用 html2pdf 的容器：容器会把 A4 盒按页宽重排，取景就偏。 */
 function exportImgPdf(){
   const hasLib = typeof html2canvas !== 'undefined' && window.jspdf && window.jspdf.jsPDF;
   if(!hasLib){
-    toast('PDF 组件未加载（需联网），已改用打印导出');
-    lockPageHover(true);
-    window.addEventListener('afterprint', ()=> lockPageHover(false), { once:true });
-    setTimeout(()=>{ window.print(); setTimeout(()=> lockPageHover(false), 600); }, 200);
+    toast('PDF 组件未加载（首次使用需要联网加载），请检查网络后重试');
     return;
   }
   const btn = document.getElementById('pdfConfirm');
@@ -2758,11 +2807,33 @@ function exportImgPdf(){
       }
 
       /* 统一命名：姓名-求职意向-简历 */
-      pdf.save(resumeFileName() + '.pdf');
+      const filename = resumeFileName() + '.pdf';
+      pdf.save(filename);
+
+      let archive = null;
+      let archiveErr = null;
+      if(COMPANY_ID){
+        try{
+          archive = await archiveCompanyPdf(pdf);
+        }catch(err){
+          archiveErr = err;
+        }
+      }
       done(true);
+      if(archiveErr){
+        toast('PDF 已下载；未写入公司档案：' + archiveErr.message);
+      }else if(archive && archive.skipped){
+        toast('PDF 已下载；公司文件夹已有 resume.pdf，未覆盖',
+          { label:'打开文件夹', onClick: openCompanyFolder });
+      }else if(archive){
+        toast('PDF 已下载，并归档到公司文件夹：resume.pdf',
+          { label:'打开文件夹', onClick: openCompanyFolder });
+      }else{
+        toast('已导出 PDF');
+      }
     }catch(err){
       console.error(err); done(false);
-      toast('导出失败，请改用「打印 · 矢量」另存为 PDF');
+      toast('导出失败：' + (err && err.message ? err.message : 'PDF 生成异常'));
     }
   };
 
@@ -2774,7 +2845,6 @@ function exportImgPdf(){
 }
 
 document.getElementById('btnPdf').onclick = openPdfPreview;
-document.getElementById('btnImgPdf').onclick = exportPdf;
 document.getElementById('pdfCancel').onclick = closePdfPreview;
 document.getElementById('pdfConfirm').onclick = ()=> exportImgPdf();
 
@@ -3067,6 +3137,10 @@ applyZoom();
 (async function initCompany(){
   if(!COMPANY_ID) return;
   document.getElementById('companyBar').hidden = false;
+  /* 嵌入公司档案时隐藏顶栏「导出 HTML」：它的职责已经由公司条「保存简历 HTML 到公司档案」承担，
+     两个按钮同时出现只是在问用户「你要下载还是归档」，容易误点。 */
+  const topExport = document.getElementById('btnExportHtml');
+  if(topExport) topExport.style.display = 'none';
   setSyncState('读取公司档案…', 'busy');
 
   try{
@@ -3154,16 +3228,6 @@ applyZoom();
     renderEditor();
     save();
   }
-
-  const openCompanyFolder = async ()=>{
-    try{
-      const r = await fetch('/api/companies/' + COMPANY_ID + '/open', { method:'POST' });
-      const j = await r.json().catch(()=>({}));
-      if(!r.ok || j.error) toast('打不开文件夹：' + (j.error || ('HTTP ' + r.status)));
-    }catch(e){
-      toast('打不开文件夹：' + e.message);
-    }
-  };
 
   document.getElementById('btnCompanyExport').addEventListener('click', async ()=>{
     const btn = document.getElementById('btnCompanyExport');

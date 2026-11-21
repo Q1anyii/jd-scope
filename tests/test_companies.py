@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import os
 import sqlite3
 import sys
@@ -138,6 +139,19 @@ class TestCompanyFiles(CompanyBase):
         self.assertTrue(detail["files"]["html"])
         self.assertEqual(detail["status"], "exported")
 
+    def test_pdf_archive_once_and_skip_existing(self):
+        cid = companies.create(self.conn, "PDF 公司", self.job_id, None)["id"]
+        first = companies.save_pdf(self.conn, cid, b"%PDF-1.4\n" + b"x" * 300)
+        self.assertTrue(first["ok"])
+        self.assertFalse(first["skipped"])
+        root = Path(self._tmp) / "config" / "resumes" / companies.detail(self.conn, cid)["folder"]
+        self.assertTrue((root / "resume.pdf").exists())
+        self.assertTrue(companies.detail(self.conn, cid)["files"]["pdf"])
+
+        second = companies.save_pdf(self.conn, cid, b"%PDF-1.4\n" + b"y" * 300)
+        self.assertTrue(second["skipped"])
+        self.assertEqual((root / "resume.pdf").read_bytes(), b"%PDF-1.4\n" + b"x" * 300)
+
     def test_delete_record_keeps_folder(self):
         cid = companies.create(self.conn, "保留公司", self.job_id, None)["id"]
         folder = companies.detail(self.conn, cid)["folder"]
@@ -209,6 +223,12 @@ class TestApiCompanies(CompanyBase):
 
         html = "<!doctype html><html><body>" + "x" * 400 + "</body></html>"
         self.assertTrue(self.call(f"/api/companies/{cid}/export", "POST", {"html": html})["ok"])
+
+        pdf_b64 = base64.b64encode(b"%PDF-1.4\n" + b"z" * 200).decode("ascii")
+        pdf_out = self.call(f"/api/companies/{cid}/pdf", "POST", {"pdf": pdf_b64})
+        self.assertTrue(pdf_out["ok"])
+        self.assertFalse(pdf_out["skipped"])
+        self.assertTrue(self.call(f"/api/companies/{cid}")["files"]["pdf"])
 
         self.assertTrue(self.call(f"/api/companies/{cid}/adopt-base", "POST", {})["ok"])
         self.assertIn("error", self.call(f"/api/companies/{cid}/base-html"))

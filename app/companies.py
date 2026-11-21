@@ -226,6 +226,7 @@ def detail(conn, cid: int) -> dict:
         "jd": (root / "jd.txt").exists(),
         "resume": (root / "resume.json").exists(),
         "html": (root / "resume.html").exists(),
+        "pdf": (root / "resume.pdf").exists(),
         "strategy": (root / "strategy.md").exists(),
         "report": (root / "report.md").exists(),
         "base": (root / "base.html").exists(),
@@ -363,6 +364,23 @@ def save_export(conn, cid: int, html: str) -> dict:
     )
     conn.commit()
     return {"ok": True, "bytes": len(html.encode("utf-8"))}
+
+
+def save_pdf(conn, cid: int, data: bytes) -> dict:
+    """把编辑器导出的 PDF 归档到公司文件夹；已有 resume.pdf 时按用户口径跳过，不覆盖。"""
+    row = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    if row is None:
+        return {"error": "公司档案不存在"}
+    target = folder_of(row) / "resume.pdf"
+    if target.exists():
+        return {"ok": True, "skipped": True, "bytes": target.stat().st_size}
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    conn.execute(
+        "UPDATE companies SET status='exported', updated_at=? WHERE id=?", (db.now(), cid)
+    )
+    conn.commit()
+    return {"ok": True, "skipped": False, "bytes": len(data)}
 
 
 def base_html(conn, cid: int) -> str:

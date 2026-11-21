@@ -113,7 +113,7 @@ export const Companies = {
   <div>
     <div class="view-head">
       <h1>公司档案</h1>
-      <p>每个公司一个文件夹：<code>jd.txt</code> / <code>strategy.md</code> / <code>resume.json</code> / <code>resume.html</code>，编辑器草稿也按公司隔离。改完直接在编辑器里导出，一条龙走完。</p>
+      <p>每个公司一个文件夹：<code>jd.txt</code> / <code>strategy.md</code> / <code>resume.json</code> / <code>resume.html</code> / <code>resume.pdf</code>，编辑器草稿也按公司隔离。改完直接在编辑器里导出，一条龙走完。</p>
     </div>
 
     <div class="panel">
@@ -154,6 +154,7 @@ export const Companies = {
                 <div class="row-gap">
                   <span class="badge plain" :style="c.files && c.files.resume ? '' : 'opacity:.38'">简历</span>
                   <span class="badge plain" :style="c.files && c.files.html ? '' : 'opacity:.38'">HTML</span>
+                  <span class="badge plain" :style="c.files && c.files.pdf ? '' : 'opacity:.38'">PDF</span>
                   <span class="badge plain" :style="c.files && c.files.strategy ? '' : 'opacity:.38'">策略</span>
                   <span class="badge plain" v-if="c.files && c.files.jd">JD</span>
                 </div>

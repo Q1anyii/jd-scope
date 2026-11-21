@@ -115,10 +115,31 @@ base.html       HTML 基底原文，编辑器首次导入后删除
 - 「保存简历 HTML 到公司档案」成功后，提示条右侧出现「打开文件夹」，调用 `POST /api/companies/<id>/open` 直接打开公司档案目录。
 - 打印媒体里继续隐藏 `.toast`，按钮不会进 PDF。
 
+## 8. 补充：去掉系统打印，改内置 PDF 预览，并归档到公司目录
+
+**为什么不再走打印**
+
+- 用户两次截图里 Chrome 打印预览都显示 2 页，而编辑器 A4 预览是一页；第一次是 `min-height:297mm` 顶满页底被 0.1px 舍入切出空白页，修完确实 1 页。
+- 第二次是内容本身略微超过一页（9 个项目实测超出 1 页 281pt），打印预览如实显示 2 页；继续在打印 CSS 上打补丁只会让「预览一页、打印两页」的错位反复出现。
+- 因此移除顶栏「打印 · 矢量」按钮和 `exportPdf()`，内置「导出 PDF」成为唯一 PDF 路径：先大窗预览，红色虚线标出 A4 分页位置，确认后直接生成文件，不再经过系统打印对话框。
+
+**内置 PDF 导出的三个坑**
+
+1. `openPdfPreview()` 原来先测量、后显示弹窗；`#pdfModal` 处于 `hidden` 时 `offsetHeight` 为 0，`pdfPageCount()` 把多页误判成单页。改为先 `hidden = false` 再测量，9 项目档案正确显示「共 2 页 · 按 A4 分页」。
+2. `buildExportBox()` 原写死 `height:1122px; overflow:hidden`，超过一页的内容会被裁掉，多页切片分支实际是死代码。改成 `min-height:1122px; height:auto; overflow:visible`，让 canvas 拿到完整内容再切片。
+3. 组件未加载时不再回退 `window.print()`，只提示检查网络；避免用户以为点的是内置导出，实际又弹回打印窗口。
+
+**PDF 归档公司目录**
+
+- 新增 `POST /api/companies/<id>/pdf`：前端把 jsPDF 的 Blob 转 base64 上传，服务端校验长度、`%PDF` 文件头与 32MB 上限后写入公司文件夹的 `resume.pdf`。
+- 已有 `resume.pdf` 时 `save_pdf()` 直接返回 `skipped: true`，不覆盖旧文件；岗位/公司回到 `exported` 状态，`detail().files.pdf` 与公司列表的「PDF」徽标同步亮起。
+- 编辑器导出流程：`pdf.save()` 先落地本地下载，再 `archiveCompanyPdf()` 上传归档；成功提示「PDF 已下载，并归档到公司文件夹：resume.pdf」，右侧仍带「打开文件夹」按钮；已有文件时提示「未覆盖」。
+- 嵌入公司档案时「导出 HTML」按钮继续隐藏，避免与公司条的「保存简历 HTML 到公司档案」重复；独立打开编辑器仍保留本地 HTML 下载。
+
 ## 验收
 
-- `python -m unittest discover -s tests`：**62 用例全绿**（新增岗位编辑 2 个：元信息更新、空值拒绝）。
-- 本地 stub 模型端到端：`POST /api/settings` 指向 `127.0.0.1:8899/v1` → `POST /api/editor/chat` 返回 `{"ok":true,"content":"{\"changes\": []}"}`。
+- `python -m unittest discover -s tests`：**63 用例全绿**（新增 PDF 归档：首次写入、二次 `skipped` 且内容不变；HTTP 链路也覆盖）。
 - 打印：修复前 2 页 / 修复后 1 页（同一份 488pt 简历，Chrome `--print-to-pdf`）。
+- 内置 PDF：9 项目档案预览显示 2 页，导出文件实际 2 页（`/Type /Page` 计数），归档 `resume.pdf` 1,321,370B；再次上传同公司返回 `skipped: true`，文件 mtime 与内容不变。
 - 早前端到端实测：HTML 基底 → 建档 → 打开编辑器 → 自动解析出 2 个模块（姓名「张三」）→ `resume.json` 落盘 3555B → `base.html` 已删除。
 - 截图：`docs/ui-companies.png`、`docs/ui-editor.png`；另以 1920×1080 检查宽屏铺满。

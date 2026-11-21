@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import re
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -733,6 +734,29 @@ class Api:
         conn = self._conn()
         try:
             return companies.save_export(conn, cid, html)
+        finally:
+            conn.close()
+
+    @route("POST", r"/api/companies/\d+/pdf")
+    def company_pdf(self, m, body, q):
+        """收编辑器生成的 PDF：base64 → resume.pdf；已有文件时跳过，不覆盖。"""
+        cid = int(m.group(0).split("/")[-2])
+        raw = body.get("pdf") or ""
+        if not isinstance(raw, str) or not raw:
+            return {"error": "PDF 内容为空"}
+        if raw.startswith("data:"):
+            raw = raw.split(",", 1)[-1]
+        try:
+            data = base64.b64decode(raw, validate=True)
+        except (ValueError, TypeError):
+            return {"error": "PDF base64 解析失败"}
+        if len(data) < 100 or not data.startswith(b"%PDF"):
+            return {"error": "不是有效的 PDF 文件"}
+        if len(data) > 32 * 1024 * 1024:
+            return {"error": "PDF 超过 32MB，未归档"}
+        conn = self._conn()
+        try:
+            return companies.save_pdf(conn, cid, data)
         finally:
             conn.close()
 
