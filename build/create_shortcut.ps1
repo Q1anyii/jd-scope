@@ -15,7 +15,8 @@ $shell = New-Object -ComObject WScript.Shell
 $sc = $shell.CreateShortcut($link)
 $sc.TargetPath = $exe
 $sc.WorkingDirectory = (Split-Path $exe -Parent)
-$sc.IconLocation = (Join-Path $root 'assets\icon.ico')
+# The icon is embedded in the exe, so the shortcut stays valid if the folder moves.
+$sc.IconLocation = "$exe,0"
 $sc.Description = 'JDScope - JD insight and resume gap ledger'
 $sc.Save()
 

@@ -5,14 +5,21 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 
-Write-Host '[1/3] generating icon'
-python tools\make_icon.py
+Write-Host '[1/4] generating icon'
+if (Test-Path "$root\assets\icon-src.png") {
+  # Source artwork available: crop, make corners transparent, emit 7 sizes.
+  # Needs Pillow (icon conversion only, not a runtime dependency).
+  python tools\png_to_ico.py
+} else {
+  # Fallback: draw the icon from scratch with the standard library only.
+  python tools\make_icon.py
+}
 
-Write-Host '[2/3] cleaning old output'
+Write-Host '[2/4] cleaning old output'
 Remove-Item -Recurse -Force "$root\build\pyinstaller" -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force "$root\dist" -ErrorAction SilentlyContinue
 
-Write-Host '[3/3] pyinstaller build'
+Write-Host '[3/4] pyinstaller build'
 python -m PyInstaller `
   --noconfirm --clean --onefile --windowed `
   --name JDScope `
@@ -27,6 +34,9 @@ python -m PyInstaller `
   --workpath "$root\build\pyinstaller" `
   --specpath "$root\build" `
   "$root\run.py"
+
+Write-Host '[4/4] refreshing desktop shortcut'
+& "$root\build\create_shortcut.ps1"
 
 Write-Host ''
 Write-Host ('done: ' + (Join-Path $root 'dist\JDScope.exe'))

@@ -3,3 +3,7 @@ pywebview>=5.0
 
 # 仅打包时需要
 pyinstaller>=6.0
+
+# 仅把 assets/icon-src.png 转成 ico 时需要（tools/png_to_ico.py）
+# 没有源图时构建脚本回退到 tools/make_icon.py，只用标准库也能出图标
+Pillow>=10.0

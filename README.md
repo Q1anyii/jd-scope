@@ -94,7 +94,8 @@ backups\        预留
 powershell -ExecutionPolicy Bypass -File build\build_exe.ps1
 ```
 
-产物：`dist\JDScope.exe`（单文件、windowed、自带图标）。
+产物：`dist\JDScope.exe`（单文件、windowed、自带图标），构建脚本最后会刷新桌面快捷方式。
+图标：`assets\icon-src.png` 为源图，`tools\png_to_ico.py` 负责裁边、圆角外透明、按尺寸简化（16px 去掉镜片内细线）并写出 7 层 ICO；没有源图时回退到 `tools\make_icon.py`（纯标准库绘制）。
 启动顺序：WebView2 原生窗口 → Edge/Chrome `--app` 窗口 → 默认浏览器。端口被占用会自动退回临时端口，不会静默失败。
 
 ## 测试
@@ -119,8 +120,12 @@ app/
   api.py         纯标准库 HTTP 接口
   main.py        桌面入口（WebView2 / --app / 浏览器三级回退）
   web/           前端（原生 JS，无构建）
-tools/make_icon.py   纯标准库生成多尺寸 ico
-build/build_exe.ps1  PyInstaller 打包
+tools/
+  make_icon.py       纯标准库绘制多尺寸 ico（无源图时的回退）
+  png_to_ico.py      源图转 ico：裁边、圆角外透明、小尺寸简化
+build/
+  build_exe.ps1      PyInstaller 打包
+  create_shortcut.ps1 桌面快捷方式（图标取自 exe）
 samples/             合成样例数据（非真实个人信息）
 tests/               单元测试
 ```
