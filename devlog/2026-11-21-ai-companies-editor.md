@@ -136,9 +136,29 @@ base.html       HTML 基底原文，编辑器首次导入后删除
 - 编辑器导出流程：`pdf.save()` 先落地本地下载，再 `archiveCompanyPdf()` 上传归档；成功提示「PDF 已下载，并归档到公司文件夹：resume.pdf」，右侧仍带「打开文件夹」按钮；已有文件时提示「未覆盖」。
 - 嵌入公司档案时「导出 HTML」按钮继续隐藏，避免与公司条的「保存简历 HTML 到公司档案」重复；独立打开编辑器仍保留本地 HTML 下载。
 
+## 9. 补充：设置页可改两类模型提示词
+
+**需求**
+
+设置页「模型端点」下要能直接改提示词，并区分 JD 分析与简历改写；两页都要能滚动，长提示词不能把设置页撑爆。
+
+**实现**
+
+- 数据库 `settings` 新增两个键：`prompt_jd_analysis`、`prompt_resume_rewrite`；空字符串表示「用内置默认」，保存时如果内容与默认原文一致也自动清空，避免出现「看着是自定义、实际没变」。
+- `llm.py` 导出 `DEFAULT_PROMPTS` 与 `PROMPT_LABELS`，新增 `_effective_prompt()`：有自定义值就用自定义，否则回落 `SYSTEM_PARSE` / `SYSTEM_SUGGEST`。
+- `parse_jd_items()` 与 `suggest_rewrite()` 的 system message 改为读取配置里的提示词；`settings_dict()` 把当前值与默认原文一并下发，前端不需要另存一份文案。
+- 设置页新增两个页签：「JD 分析提示词」用于「JD 入库」的 AI 解析，「简历改写提示词」用于岗位详情「生成改写建议」；每个 textarea 固定高度、`overflow-y:auto`，长内容在框内滚动。
+- 操作：保存提示词、填入默认（把默认原文灌进输入框，再点保存即恢复）、未保存修改提示；后端 20000 字符上限，超长直接拒绝。
+- 明确边界：编辑器里的 AI 对齐仍使用编辑器自己的 System Prompt；设置页这两个只控制主程序的两类任务，避免两套 schema 混用导致 JSON 解析失败。
+
+**验收**
+
+- 66 用例全绿；新增 3 个：默认值与保存/恢复、超长拒绝、自定义提示词确实进入 `messages[0]`。
+- 临时实例截图确认两个页签都能切换，textarea 固定高度且可滚动；`POST /api/settings` 保存后 `GET` 能读回，自定义值真实生效。
+
 ## 验收
 
-- `python -m unittest discover -s tests`：**63 用例全绿**（新增 PDF 归档：首次写入、二次 `skipped` 且内容不变；HTTP 链路也覆盖）。
+- `python -m unittest discover -s tests`：**66 用例全绿**（新增 PDF 归档与设置页提示词：首次写入、二次 `skipped` 且内容不变；提示词默认、保存、恢复与模型注入）。
 - 打印：修复前 2 页 / 修复后 1 页（同一份 488pt 简历，Chrome `--print-to-pdf`）。
 - 内置 PDF：9 项目档案预览显示 2 页，导出文件实际 2 页（`/Type /Page` 计数），归档 `resume.pdf` 1,321,370B；再次上传同公司返回 `skipped: true`，文件 mtime 与内容不变。
 - 早前端到端实测：HTML 基底 → 建档 → 打开编辑器 → 自动解析出 2 个模块（姓名「张三」）→ `resume.json` 落盘 3555B → `base.html` 已删除。

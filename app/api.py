@@ -49,6 +49,12 @@ class Api:
             "model": db.get_setting(conn, "llm_model", DEFAULT_LLM_MODEL),
             "api_key": db.get_setting(conn, "llm_api_key", ""),
             "weights": json.loads(db.get_setting(conn, "weights", "{}") or "{}"),
+            "prompts": {
+                key: db.get_setting(conn, "prompt_" + key, "")
+                for key in llm.PROMPT_LABELS
+            },
+            # 默认原文只用于前端编辑与「恢复默认」，不参与模型调用
+            "prompt_defaults": dict(llm.DEFAULT_PROMPTS),
         }
 
     # ---------- 基础 ----------
@@ -872,6 +878,18 @@ class Api:
     def save_settings(self, m, body, q):
         conn = self._conn()
         try:
+            raw_prompts = body.get("prompts") if isinstance(body.get("prompts"), dict) else None
+            clean_prompts = {}
+            if raw_prompts is not None:
+                for key in llm.PROMPT_LABELS:
+                    if key not in raw_prompts:
+                        continue
+                    value = raw_prompts.get(key)
+                    text = value.strip() if isinstance(value, str) else ""
+                    if len(text) > 20000:
+                        return {"error": llm.PROMPT_LABELS[key] + "超过 20000 字符，未保存"}
+                    # 与默认原文一致就清空自定义值，避免「看起来自定义、实际没变」
+                    clean_prompts[key] = "" if text == llm.DEFAULT_PROMPTS[key].strip() else text
             mapping = {"base_url": "llm_base_url", "model": "llm_model", "api_key": "llm_api_key"}
             for k, col in mapping.items():
                 if k in body and body[k] is not None:
@@ -881,6 +899,8 @@ class Api:
                     db.set_setting(conn, col, str(body[k]))
             if isinstance(body.get("weights"), dict):
                 db.set_setting(conn, "weights", json.dumps(body["weights"], ensure_ascii=False))
+            for key, value in clean_prompts.items():
+                db.set_setting(conn, "prompt_" + key, value)
             return {"ok": True}
         finally:
             conn.close()

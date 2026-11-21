@@ -89,7 +89,7 @@ def suggest_rewrite(cfg: dict, jd_text: str, base_text: str, module: str = "整�
         raw = chat(
             cfg,
             [
-                {"role": "system", "content": SYSTEM_SUGGEST},
+                {"role": "system", "content": _effective_prompt(cfg, "resume_rewrite", SYSTEM_SUGGEST)},
                 {"role": "user", "content": user},
             ],
         )
@@ -147,6 +147,24 @@ SYSTEM_PARSE = """你是招聘 JD 的结构化分析员。把岗位描述拆成�
 只输出 JSON，不要任何解释文字：
 {"items":[{"text":"...","category":"must","priority":"high","terms":["..."],"reason":"为什么单列这一条（15 字内）"}]}"""
 
+# 设置页可编辑的两类提示词。默认值同时作为「恢复默认」的原文。
+DEFAULT_PROMPTS = {
+    "jd_analysis": SYSTEM_PARSE,
+    "resume_rewrite": SYSTEM_SUGGEST,
+}
+PROMPT_LABELS = {
+    "jd_analysis": "JD 分析提示词",
+    "resume_rewrite": "简历改写提示词",
+}
+
+
+def _effective_prompt(cfg: dict, key: str, fallback: str) -> str:
+    """优先用设置页保存的自定义提示词；空白则回落到内置默认。"""
+    custom = ((cfg or {}).get("prompts") or {}).get(key)
+    if isinstance(custom, str):
+        custom = custom.strip()
+    return custom or fallback
+
 
 def parse_jd_items(cfg: dict, jd_text: str) -> dict:
     """让模型给出 JD 需求候选，交给用户逐条勾选；不直接入库。"""
@@ -158,7 +176,7 @@ def parse_jd_items(cfg: dict, jd_text: str) -> dict:
         raw = chat(
             cfg,
             [
-                {"role": "system", "content": SYSTEM_PARSE},
+                {"role": "system", "content": _effective_prompt(cfg, "jd_analysis", SYSTEM_PARSE)},
                 {"role": "user", "content": user},
             ],
             temperature=0.2,

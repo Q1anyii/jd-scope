@@ -19,7 +19,15 @@ export const Settings = {
 
     const llm = reactive({ base_url: "", model: "", api_key: "" });
     const weights = reactive({ must: 30, duty: 30, nice: 15, constraint: 25 });
-    const busy = ref({ save: false, test: false, weights: false, dir: false, reset: false });
+    const prompts = reactive({ jd_analysis: "", resume_rewrite: "" });
+    const promptDefaults = reactive({ jd_analysis: "", resume_rewrite: "" });
+    const promptSaved = reactive({ jd_analysis: "", resume_rewrite: "" });
+    const promptTab = ref("jd_analysis");
+    const promptTabs = [
+      { key: "jd_analysis", label: "JD 分析提示词" },
+      { key: "resume_rewrite", label: "简历改写提示词" },
+    ];
+    const busy = ref({ save: false, test: false, weights: false, prompts: false, dir: false, reset: false });
     const testHint = ref("");
     const modal = reactive({ open: false, path: "", migrate: true, error: "", note: "" });
     const canBrowse = ref(false);
@@ -34,6 +42,13 @@ export const Settings = {
       weights.duty = w.duty ?? 30;
       weights.nice = w.nice ?? 15;
       weights.constraint = w.constraint ?? 25;
+      const p = cfg.prompts || {};
+      const d = cfg.prompt_defaults || {};
+      for (const key of ["jd_analysis", "resume_rewrite"]) {
+        promptDefaults[key] = d[key] || "";
+        promptSaved[key] = (p[key] || "").trim();
+        prompts[key] = promptSaved[key] || promptDefaults[key];
+      }
     };
     sync();
     watch(() => s.settings, sync);
@@ -42,6 +57,18 @@ export const Settings = {
       const n = ["must", "duty", "nice", "constraint"].reduce((acc, k) => acc + Number(weights[k] || 0), 0);
       return Math.round(n * 10) / 10;
     });
+
+    const promptDirty = computed(() => promptTabs.some(({ key }) =>
+      (prompts[key] || "").trim() !== (promptSaved[key] || promptDefaults[key] || "").trim()
+    ));
+
+    const promptStatus = (key) => {
+      const cur = (prompts[key] || "").trim();
+      const def = (promptDefaults[key] || "").trim();
+      return cur && cur !== def
+        ? { text: "自定义", cls: "ok" }
+        : { text: "默认", cls: "plain" };
+    };
 
     const saveLlm = async () => {
       busy.value.save = true;
@@ -76,6 +103,28 @@ export const Settings = {
         toast("权重已保存，记得对岗位点「重算」", "ok");
       } catch (err) { toast(err.message, "err"); }
       finally { busy.value.weights = false; }
+    };
+
+    /* ---- 模型提示词 ---- */
+    const fillPromptDefault = (key) => {
+      prompts[key] = promptDefaults[key] || "";
+    };
+
+    const savePrompts = async () => {
+      busy.value.prompts = true;
+      try {
+        const payload = {};
+        for (const key of ["jd_analysis", "resume_rewrite"]) {
+          const cur = (prompts[key] || "").trim();
+          const def = (promptDefaults[key] || "").trim();
+          // 与默认一致就传空值，让后端清掉自定义覆盖
+          payload[key] = cur === def ? "" : cur;
+        }
+        await api.saveSettings({ prompts: payload });
+        await loadBoot();
+        toast("提示词已保存", "ok");
+      } catch (err) { toast(err.message, "err"); }
+      finally { busy.value.prompts = false; }
     };
 
     /* ---- 数据位置 ---- */
@@ -142,7 +191,8 @@ export const Settings = {
     return {
       s, llm, weights, busy, testHint, modal, canBrowse, weightTotal,
       dataInfo, sourceLabel, locked, fmtBytes,
-      saveLlm, testLlm, saveWeights,
+      prompts, promptDefaults, promptTab, promptTabs, promptDirty, promptStatus,
+      saveLlm, testLlm, saveWeights, savePrompts, fillPromptDefault,
       openModal, browse, switchDir, resetDir, openFolder,
     };
   },
@@ -196,6 +246,45 @@ export const Settings = {
           <span class="hint">{{ testHint }}</span>
         </div>
         <p class="hint">模型只负责「出候选」：JD 解析的条目要你勾选才入库，改写建议与面试口径要你点「采用」才写台账；不配置也能用规则解析。</p>
+
+        <!-- 提示词：两类任务分开编辑，各自在固定高度内滚动 -->
+        <div class="prompt-block">
+          <div class="row-between">
+            <div class="prompt-tabs" role="tablist">
+              <button v-for="tab in promptTabs" :key="tab.key" type="button"
+                      class="prompt-tab" :class="{ on: promptTab === tab.key }"
+                      @click="promptTab = tab.key">{{ tab.label }}</button>
+            </div>
+            <span class="badge" :class="promptStatus(promptTab).cls">{{ promptStatus(promptTab).text }}</span>
+          </div>
+          <p class="hint mt8">可改提示词但不改输出协议：必须保留「只输出 JSON」和对应字段名，否则解析会失败。留空即用内置默认。</p>
+
+          <div v-show="promptTab === 'jd_analysis'" class="prompt-pane">
+            <textarea v-model="prompts.jd_analysis" class="prompt-editor mono" spellcheck="false"
+                      maxlength="20000" placeholder="JD 分析提示词"></textarea>
+            <div class="prompt-foot">
+              <span class="hint">用于「JD 入库」页的 AI 解析；条目只是候选，勾选才入库。{{ (prompts.jd_analysis || '').length }} / 20000</span>
+              <button class="ghost" type="button" @click="fillPromptDefault('jd_analysis')">填入默认</button>
+            </div>
+          </div>
+
+          <div v-show="promptTab === 'resume_rewrite'" class="prompt-pane">
+            <textarea v-model="prompts.resume_rewrite" class="prompt-editor mono" spellcheck="false"
+                      maxlength="20000" placeholder="简历改写提示词"></textarea>
+            <div class="prompt-foot">
+              <span class="hint">用于岗位详情「生成改写建议」；只改表达、不动事实。{{ (prompts.resume_rewrite || '').length }} / 20000</span>
+              <button class="ghost" type="button" @click="fillPromptDefault('resume_rewrite')">填入默认</button>
+            </div>
+          </div>
+
+          <div class="row-gap mt12">
+            <button class="primary" type="button" @click="savePrompts" :disabled="busy.prompts">
+              {{ busy.prompts ? '保存中…' : '保存提示词' }}
+            </button>
+            <span class="badge warn" v-if="promptDirty">有未保存修改</span>
+            <span class="hint">编辑器里的 AI 对齐提示词仍在编辑器自己的 System Prompt 中修改。</span>
+          </div>
+        </div>
       </div>
     </div>
 
