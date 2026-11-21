@@ -2,7 +2,7 @@
 
 **把岗位 JD 变成可决策的结构化数据，并沉淀成一份跨岗位的缺口台账。**
 
-本地单机、零云端、零账号。双击 `dist\JDScope.exe` 就能用。
+本地单机、零云端、零账号。**[下载 JDScope.exe](https://github.com/Q1anyii/jd-scope/releases/latest/download/JDScope.exe)**，双击就能用。
 
 ---
 
@@ -64,10 +64,11 @@ JDScope 只做中间这一层：**决策层**。
 
 ## 快速开始
 
-### 用打包好的版本
+### 下载即用（推荐）
 
-1. 双击 `dist\JDScope.exe`（首次启动约 3–5 秒，无命令行窗口）
-2. 若想放到桌面：运行 `build\create_shortcut.ps1`，会在桌面建一个带图标的快捷方式
+1. 打开 [Releases](https://github.com/Q1anyii/jd-scope/releases/latest)，或直接 **[下载 JDScope.exe](https://github.com/Q1anyii/jd-scope/releases/latest/download/JDScope.exe)**
+2. 双击 `JDScope.exe`（Windows 10/11，首次启动约 3–5 秒，无命令行窗口）；未签名版本可能被 SmartScreen 提示，点「更多信息 → 仍要运行」
+3. 若想放到桌面：右键 exe 发送到桌面快捷方式，或从源码运行 `build\create_shortcut.ps1`
 
 ### 用源码运行
 
