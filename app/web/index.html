@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JDScope · 岗位 JD 透视</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="10.5" cy="10.5" r="6.2" fill="none" stroke="currentColor" stroke-width="2.1"/>
+      <path d="M15.2 15.2 L20 20" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+      <path d="M7.7 9.2h5.6M7.7 11.6h3.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity=".75"/>
+    </svg>
+    <span class="brand-name">JDScope</span>
+    <span class="brand-sub">岗位 JD 透视 · 简历缺口台账</span>
+  </div>
+  <div class="chips" id="topChips"></div>
+  <div class="top-actions">
+    <button class="ghost" id="btnRefresh" title="重新拉取数据">刷新</button>
+  </div>
+</header>
+
+<aside class="rail" id="rail">
+  <button class="nav active" data-view="dash">概览</button>
+  <button class="nav" data-view="intake">JD 入库</button>
+  <button class="nav" data-view="jobs">岗位</button>
+  <button class="nav" data-view="gaps">缺口库</button>
+  <button class="nav" data-view="bases">基底库</button>
+  <button class="nav" data-view="profile">档案</button>
+  <button class="nav" data-view="settings">设置</button>
+</aside>
+
+<main class="main">
+  <!-- 概览 -->
+  <section class="view active" id="view-dash">
+    <div class="view-head">
+      <h1>概览</h1>
+      <p class="muted">台账的价值在于跨岗位聚合：单个岗位看匹配度，多个岗位才看得出该补什么。</p>
+    </div>
+    <div class="cards" id="statCards"></div>
+
+    <div class="grid2">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>技能需求榜</h2>
+          <span class="hint">家数 = 有多少个岗位要求过；覆盖 = 你的基底里有没有</span>
+        </div>
+        <div class="scroll-y" id="termTable"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>缺口热点</h2>
+          <span class="hint">同一类缺口在多少岗位反复出现</span>
+        </div>
+        <div class="scroll-y" id="gapHot"></div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="panel">
+        <div class="panel-head"><h2>基底表现</h2><span class="hint">用完的基底 × 投递结果</span></div>
+        <div class="scroll-y" id="basePerf"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>城市分布</h2><span class="hint">投递重心落在哪</span></div>
+        <div class="scroll-y" id="cityStats"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- JD 入库 -->
+  <section class="view" id="view-intake">
+    <div class="view-head">
+      <h1>JD 入库</h1>
+      <p class="muted">粘原文 → 解析 → 保存。解析是纯本地的规则抽取，不联网、不调模型。</p>
+    </div>
+    <div class="panel">
+      <div class="form-grid">
+        <label>公司<input id="fCompany" placeholder="可从 JD 自动识别，也可手填"></label>
+        <label>岗位<input id="fTitle" placeholder="如 AI应用开发工程师"></label>
+        <label>城市<input id="fCity" placeholder="如 深圳"></label>
+        <label>来源<input id="fSource" placeholder="官网 / BOSS / 内推"></label>
+        <label class="span2">链接<input id="fUrl" placeholder="岗位链接（可选）"></label>
+      </div>
+      <div class="row-between mt8">
+        <div class="row-gap">
+          <button class="ghost" id="btnLoadSample">填入示例 JD</button>
+          <label class="file-btn">从文件读取<input type="file" id="fileJd" accept=".txt,.md" hidden></label>
+        </div>
+        <span class="hint" id="jdCount">0 字</span>
+      </div>
+      <textarea id="fJd" rows="12" placeholder="把岗位描述整段粘进来，含「岗位职责 / 任职要求 / 加分项」的小标题效果最好"></textarea>
+      <div class="row-gap mt8">
+        <button class="primary" id="btnParse">解析预览</button>
+        <button class="ghost" id="btnSaveJob" disabled>保存并分析</button>
+      </div>
+    </div>
+    <div class="panel" id="parseResult" hidden>
+      <div class="panel-head"><h2>解析结果</h2></div>
+      <div id="parseBody"></div>
+    </div>
+  </section>
+
+  <!-- 岗位 -->
+  <section class="view" id="view-jobs">
+    <div class="view-head">
+      <h1>岗位</h1>
+      <p class="muted">点一行展开详情：四维得分、逐条命中证据、缺口、改写建议。</p>
+    </div>
+    <div class="panel">
+      <div class="row-gap">
+        <input id="jobSearch" placeholder="搜公司 / 岗位" class="grow">
+        <select id="jobStatus">
+          <option value="">全部状态</option>
+          <option value="new">待处理</option>
+          <option value="applied">已投递</option>
+          <option value="replied">已回复</option>
+          <option value="interview">面试中</option>
+          <option value="offer">已录用</option>
+          <option value="rejected">已拒绝</option>
+          <option value="dropped">已放弃</option>
+        </select>
+      </div>
+      <div class="table-wrap mt8"><table id="jobTable"></table></div>
+    </div>
+    <div class="panel" id="jobDetail" hidden></div>
+  </section>
+
+  <!-- 缺口库 -->
+  <section class="view" id="view-gaps">
+    <div class="view-head">
+      <h1>缺口库</h1>
+      <p class="muted">只记「JD 明确要求但简历未覆盖」的差集。可以标状态、写补课方向、生成面试应答口径。</p>
+    </div>
+    <div class="panel">
+      <div class="row-gap">
+        <select id="gapPriority">
+          <option value="">全部优先级</option>
+          <option value="high">高</option>
+          <option value="medium">中</option>
+          <option value="low">低</option>
+        </select>
+        <select id="gapStatus">
+          <option value="open">未处理</option>
+          <option value="learning">补课中</option>
+          <option value="closed">已补上</option>
+          <option value="">全部</option>
+        </select>
+        <span class="hint grow" id="gapCount"></span>
+      </div>
+      <div class="table-wrap mt8"><table id="gapTable"></table></div>
+    </div>
+  </section>
+
+  <!-- 基底库 -->
+  <section class="view" id="view-bases">
+    <div class="view-head">
+      <h1>基底库</h1>
+      <p class="muted">基底 = 不绑定公司的通用简历母版。系统按「术语命中 → 覆盖面」自动选型。</p>
+    </div>
+    <div class="panel">
+      <div class="form-grid">
+        <label>代号<input id="bCode" placeholder="如 ai-app / backend（建议英文短代号）"></label>
+        <label>求职意向<input id="bIntent" placeholder="如 AI应用开发工程师"></label>
+        <label>标签<input id="bTags" placeholder="逗号分隔，如 ai,agent,rag"></label>
+        <label>备注<input id="bLabel" placeholder="可选"></label>
+      </div>
+      <div class="row-gap mt8">
+        <label class="file-btn">导入 HTML / TXT<input type="file" id="fileBase" accept=".html,.htm,.txt,.md" hidden></label>
+        <span class="hint" id="bFileHint">未选择文件</span>
+        <span class="grow"></span>
+        <button class="primary" id="btnAddBase" disabled>登记基底</button>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>已登记</h2><span class="hint">关键词从正文自动抽取，供匹配使用</span></div>
+      <div class="table-wrap"><table id="baseTable"></table></div>
+    </div>
+  </section>
+
+  <!-- 档案 -->
+  <section class="view" id="view-profile">
+    <div class="view-head">
+      <h1>个人档案</h1>
+      <p class="muted">只用于硬性条件判定（学历 / 年限 / 英语 / 意向城市），存在本机数据库，不进代码库。</p>
+    </div>
+    <div class="panel">
+      <div class="form-grid">
+        <label>学历<select id="pEdu"><option value="">未填</option><option>博士</option><option>硕士</option><option>本科</option><option>大专</option><option>中专</option><option>高中</option></select></label>
+        <label>专业<input id="pMajor"></label>
+        <label>工作年限<input id="pYears" type="number" min="0" step="0.5"></label>
+        <label>意向城市<input id="pCities" placeholder="逗号分隔，如 深圳,东莞"></label>
+        <label class="span2">证书<input id="pCerts" placeholder="如 CET-6、软考中级"></label>
+        <label class="span2">备注<textarea id="pNotes" rows="4" placeholder="可选"></textarea></label>
+      </div>
+      <div class="row-gap mt8"><button class="primary" id="btnSaveProfile">保存档案</button><span class="hint" id="pSavedAt"></span></div>
+    </div>
+  </section>
+
+  <!-- 设置 -->
+  <section class="view" id="view-settings">
+    <div class="view-head">
+      <h1>设置</h1>
+      <p class="muted">模型是可选的。不配置也能用：解析、评分、缺口、聚合全部本地完成。</p>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>模型端点</h2><span class="hint">OpenAI 兼容协议，Key 只存本机</span></div>
+      <div class="form-grid">
+        <label>BASE_URL<input id="sBaseUrl" placeholder="https://api.deepseek.com/v1"></label>
+        <label>模型<input id="sModel" placeholder="deepseek-chat"></label>
+        <label class="span2">API Key<input id="sApiKey" type="password" placeholder="留空表示不修改已保存的 Key"></label>
+      </div>
+      <div class="row-gap mt8">
+        <button class="primary" id="btnSaveSettings">保存</button>
+        <button class="ghost" id="btnTestLlm">测试连通</button>
+        <span class="hint" id="llmTestHint"></span>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>评分权重</h2><span class="hint">四维加权，总和 100</span></div>
+      <div class="form-grid">
+        <label>必备要求<input id="wMust" type="number"></label>
+        <label>职责同构<input id="wDuty" type="number"></label>
+        <label>加分项<input id="wNice" type="number"></label>
+        <label>硬性条件<input id="wConstraint" type="number"></label>
+      </div>
+      <div class="row-gap mt8"><button class="ghost" id="btnSaveWeights">保存权重</button><span class="hint">改权重后需对岗位点一次「重算」</span></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>数据位置</h2></div>
+      <p class="hint" id="dataHome">—</p>
+      <p class="hint">数据库、导出的 Markdown 报告都在该目录下。备份直接复制这个目录即可。</p>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+<div class="overlay" id="overlay" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>
