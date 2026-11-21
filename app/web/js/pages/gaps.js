@@ -38,9 +38,9 @@ export const Gaps = {
       try {
         const out = await api.answerGap(gap.id);
         if (out.answer) {
-          gap.answer = out.answer;
+          gap.candidate = out.answer;
           expanded.value[gap.id] = true;
-          toast("已生成应答口径", "ok");
+          toast("已生成候选口径，确认后再采用", "ok");
         } else {
           toast(out.error || "模型没有返回内容", "err");
         }
@@ -48,9 +48,21 @@ export const Gaps = {
       finally { busy.value[gap.id] = false; }
     };
 
+    /* AI 出的口径只是草稿：点「采用」才写库，避免一张嘴就把台账改了 */
+    const adoptAnswer = async (gap) => {
+      try {
+        await api.updateGap(gap.id, { answer: gap.candidate });
+        gap.answer = gap.candidate;
+        gap.candidate = "";
+        toast("已采用，写进缺口台账", "ok");
+      } catch (err) { toast(err.message, "err"); }
+    };
+
+    const dropAnswer = (gap) => { gap.candidate = ""; };
+
     const toggle = (gap) => { expanded.value[gap.id] = !expanded.value[gap.id]; };
 
-    return { s, busy, expanded, filtered, PRIO_LABEL, setStatus, answer, toggle };
+    return { s, busy, expanded, filtered, PRIO_LABEL, setStatus, answer, adoptAnswer, dropAnswer, toggle };
   },
   template: `
   <div>
@@ -105,7 +117,15 @@ export const Gaps = {
                   </button>
                   <button class="mini" v-if="g.answer" @click="toggle(g)">{{ expanded[g.id] ? '收起' : '展开' }}</button>
                 </div>
-                <div class="hint mt8" v-if="g.answer && expanded[g.id]" style="color:var(--sub)">{{ g.answer }}</div>
+                <div class="mt8" v-if="g.candidate">
+                  <textarea v-model="g.candidate" rows="4" style="width:100%"></textarea>
+                  <div class="row-gap mt8">
+                    <button class="mini" @click="adoptAnswer(g)">采用</button>
+                    <button class="mini" @click="dropAnswer(g)">丢弃</button>
+                    <span class="hint">AI 候选，点采用才写进台账</span>
+                  </div>
+                </div>
+                <div class="hint mt8" v-if="g.answer && !g.candidate" style="color:var(--sub)">{{ g.answer }}</div>
               </td>
             </tr>
             <tr v-if="!filtered.length">

@@ -195,6 +195,7 @@ select { appearance: none; padding-right: 26px;
 }
 
 .row-gap { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.actions { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; justify-content: flex-end; }
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .grow { flex: 1; min-width: 0; }
 .mt8 { margin-top: 8px; }

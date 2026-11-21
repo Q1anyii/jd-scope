@@ -195,6 +195,7 @@ export const Settings = {
           <button class="ghost" @click="testLlm" :disabled="busy.test">{{ busy.test ? '测试中…' : '测试连通' }}</button>
           <span class="hint">{{ testHint }}</span>
         </div>
+        <p class="hint">模型只负责「出候选」：JD 解析的条目要你勾选才入库，改写建议与面试口径要你点「采用」才写台账；不配置也能用规则解析。</p>
       </div>
     </div>
 

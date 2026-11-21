@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 APP_NAME = "JDScope"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 
 # 仓库内的静态资源根目录（打包后为 PyInstaller 解包目录）
 BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))

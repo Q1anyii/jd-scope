@@ -36,6 +36,7 @@ export const api = {
   deleteBase: (id) => request(`/api/bases/${id}`, { method: "DELETE" }),
 
   parseJd: (payload) => request("/api/jobs/parse", { method: "POST", body: payload }),
+  parseJdAi: (payload) => request("/api/jobs/parse-ai", { method: "POST", body: payload }),
   createJob: (payload) => request("/api/jobs", { method: "POST", body: payload }),
   listJobs: (filters) => request("/api/jobs" + qs(filters)),
   getJob: (id) => request(`/api/jobs/${id}`),
@@ -59,4 +60,12 @@ export const api = {
   setDataDir: (path, migrate) => request("/api/data-dir", { method: "POST", body: { path, migrate } }),
   resetDataDir: (migrate) => request("/api/data-dir/reset", { method: "POST", body: { migrate } }),
   openDataDir: () => request("/api/data-dir/open", { method: "POST", body: {} }),
+
+  listCompanies: () => request("/api/companies"),
+  createCompany: (payload) => request("/api/companies", { method: "POST", body: payload }),
+  getCompany: (id) => request(`/api/companies/${id}`),
+  deleteCompany: (id) => request(`/api/companies/${id}`, { method: "DELETE" }),
+  saveCompanyStrategy: (id, text) => request(`/api/companies/${id}/strategy`, { method: "POST", body: { text } }),
+  openCompanyFolder: (id) => request(`/api/companies/${id}/open`, { method: "POST", body: {} }),
+  companyResume: (id) => request(`/api/companies/${id}/resume`),
 };

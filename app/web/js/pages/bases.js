@@ -82,11 +82,12 @@ export const Bases = {
       <div class="panel-head"><h2>已登记</h2><span class="hint">关键词从正文自动抽取，供匹配使用</span></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>代号</th><th>求职意向</th><th>覆盖术语</th><th>标签</th><th>识别到</th><th></th></tr></thead>
+          <thead><tr><th>代号</th><th>求职意向</th><th>类型</th><th>覆盖术语</th><th>标签</th><th>识别到</th><th></th></tr></thead>
           <tbody>
             <tr v-for="b in s.bases" :key="b.id">
               <td><strong>{{ b.code }}</strong><div class="hint">{{ b.label }}</div></td>
               <td>{{ b.intent }}</td>
+              <td><span class="badge plain">{{ b.kind === 'json' ? '编辑器 JSON' : 'HTML / 文本' }}</span></td>
               <td class="num">{{ b.coverage }}</td>
               <td>
                 <span class="badge low" v-for="t in b.tags" :key="t">{{ t }}</span>
@@ -96,7 +97,7 @@ export const Bases = {
               <td><button class="mini" @click="remove(b)">删除</button></td>
             </tr>
             <tr v-if="!s.bases.length">
-              <td colspan="6"><div class="empty">
+              <td colspan="7"><div class="empty">
                 <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
                   <path d="M5 4h9l4 4v12H5z"/><path d="M14 4v4h4"/>
                 </svg>

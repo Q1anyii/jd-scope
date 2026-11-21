@@ -1,13 +1,14 @@
 /* 根组件：顶栏、侧栏、页面切换、提示堆叠。 */
 
 import {
-  state, toast, loadHealth, loadBoot, loadStats, loadDataDir, loadJobs, loadGaps, loadBases, refreshCurrent,
+  state, toast, loadHealth, loadBoot, loadStats, loadDataDir, loadJobs, loadGaps, loadBases, loadCompanies, refreshCurrent,
 } from "./store.js";
 import { Dashboard } from "./pages/dashboard.js";
 import { Intake } from "./pages/intake.js";
 import { Jobs } from "./pages/jobs.js";
 import { Gaps } from "./pages/gaps.js";
 import { Bases } from "./pages/bases.js";
+import { Companies } from "./pages/companies.js";
 import { Profile } from "./pages/profile.js";
 import { Settings } from "./pages/settings.js";
 
@@ -19,6 +20,7 @@ const NAV = [
   { key: "jobs", label: "岗位", counter: "jobs" },
   { key: "gaps", label: "缺口库", counter: "gaps" },
   { key: "bases", label: "基底库", counter: "bases" },
+  { key: "companies", label: "公司档案" },
   { key: "profile", label: "档案" },
   { key: "settings", label: "设置" },
 ];
@@ -60,6 +62,7 @@ const App = {
       if (key === "jobs") loadJobs().catch((e) => toast(e.message, "err"));
       if (key === "gaps") loadGaps().catch((e) => toast(e.message, "err"));
       if (key === "bases") loadBases().catch((e) => toast(e.message, "err"));
+      if (key === "companies") loadCompanies().catch((e) => toast(e.message, "err"));
       if (key === "settings") {
         loadDataDir().catch((e) => toast(e.message, "err"));
         loadBoot().catch((e) => toast(e.message, "err"));
@@ -135,6 +138,7 @@ const App = {
       <jobs-page v-else-if="s.view === 'jobs'"></jobs-page>
       <gaps-page v-else-if="s.view === 'gaps'"></gaps-page>
       <bases-page v-else-if="s.view === 'bases'"></bases-page>
+      <companies-page v-else-if="s.view === 'companies'"></companies-page>
       <profile-page v-else-if="s.view === 'profile'"></profile-page>
       <settings-page v-else-if="s.view === 'settings'"></settings-page>
     </main>
@@ -151,6 +155,7 @@ app.component("intake", Intake);
 app.component("jobs-page", Jobs);
 app.component("gaps-page", Gaps);
 app.component("bases-page", Bases);
+app.component("companies-page", Companies);
 app.component("profile-page", Profile);
 app.component("settings-page", Settings);
 app.mount("#app");

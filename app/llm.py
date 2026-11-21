@@ -133,6 +133,61 @@ def answer_gap(cfg: dict, requirement: str, resume_state: str, gap: str) -> dict
         return {"error": f"{type(e).__name__}: {e}"}
 
 
+SYSTEM_PARSE = """你是招聘 JD 的结构化分析员。把岗位描述拆成一条条「可以拿简历去核对」的要求。
+严格要求：
+1. 只能基于 JD 原文，不得补造 JD 里没有的技术、年限、学历或职责；
+2. 一条只讲一件事，40 字以内，保留 JD 的关键限定词（如「独立负责」「至少 2 年」）；
+3. category 三选一：must（硬性任职门槛）/ duty（要做的职责）/ nice（加分项）；
+4. priority 三选一：high / medium / low；硬性门槛与「必须/精通/至少」类描述用 high；
+5. terms 给 2-4 个可核对的关键词，用 JD 原词（Go、Kubernetes、分布式事务 这种），没有具体技术就留空数组；
+6. 不要输出公司介绍、福利待遇、简历投递方式。
+只输出 JSON，不要任何解释文字：
+{"items":[{"text":"...","category":"must","priority":"high","terms":["..."],"reason":"为什么单列这一条（15 字内）"}]}"""
+
+
+def parse_jd_items(cfg: dict, jd_text: str) -> dict:
+    """让模型给出 JD 需求候选，交给用户逐条勾选；不直接入库。"""
+    try:
+        user = (
+            f"JD 原文：\n{jd_text[:5000]}\n\n"
+            "请拆成 6-14 条，输出 JSON。"
+        )
+        raw = chat(
+            cfg,
+            [
+                {"role": "system", "content": SYSTEM_PARSE},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.2,
+        )
+        data = _extract_json(raw)
+        items = data.get("items")
+        if not isinstance(items, list):
+            return {"error": "返回结构不符合约定（缺少 items 数组）"}
+        clean = []
+        for it in items[:20]:
+            if not isinstance(it, dict):
+                continue
+            text = str(it.get("text") or "").strip()
+            if len(text) < 3:
+                continue
+            terms = it.get("terms")
+            clean.append(
+                {
+                    "text": text[:60],
+                    "category": str(it.get("category") or "duty"),
+                    "priority": str(it.get("priority") or "medium"),
+                    "terms": terms if isinstance(terms, list) else [],
+                    "reason": str(it.get("reason") or "")[:80],
+                }
+            )
+        return {"items": clean}
+    except urllib.error.HTTPError as e:
+        return {"error": f"接口返回 {e.code}：{e.read()[:200].decode('utf-8', 'ignore')}"}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
 def test_connection(cfg: dict) -> dict:
     try:
         reply = chat(cfg, [{"role": "user", "content": "回复两个字：连通"}], temperature=0)

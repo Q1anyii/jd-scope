@@ -198,6 +198,64 @@ def _dedupe_requirements(items: list[Requirement]) -> list[Requirement]:
     return keep
 
 
+def normalize_ai_items(items: list) -> list[dict]:
+    """把模型给的候选条目收敛成与规则条目同构的结构。
+
+    模型只负责「读懂了什么」，不负责打分：权重一律按分类取默认值，
+    优先级非法就回落到分类默认值，术语缺失时补一次本地词表匹配。
+    """
+    clean: list[dict] = []
+    for raw in items if isinstance(items, list) else []:
+        if isinstance(raw, str):
+            raw = {"text": raw}
+        if not isinstance(raw, dict):
+            continue
+        text = str(raw.get("text") or "").strip()
+        if len(text) < 3:
+            continue
+        category = str(raw.get("category") or "").strip()
+        if category not in WEIGHT:
+            category = "must" if any(w in text for w in HARD_WORDS) else "duty"
+        priority = str(raw.get("priority") or "").strip()
+        if priority not in ("high", "medium", "low"):
+            priority = PRIORITY[category]
+        terms = raw.get("terms")
+        if not isinstance(terms, list) or not terms:
+            terms = find_terms(text)
+        clean.append(
+            {
+                "text": text[:60],
+                "category": category,
+                "weight": WEIGHT[category],
+                "priority": priority,
+                "terms": [str(t)[:24] for t in terms][:5],
+                "rel": str(raw.get("reason") or raw.get("rel") or "")[:80],
+            }
+        )
+    return clean
+
+
+def merge_ai_items(parsed: dict, ai_items: list[dict]) -> dict:
+    """把用户勾选的 AI 条目并入规则结果：同文去重，规则条目优先保留。"""
+    existing = {normalize(r["text"]): r for r in parsed.get("requirements", [])}
+    merged = list(parsed.get("requirements", []))
+    for item in ai_items:
+        key = normalize(item["text"])
+        if len(key) < 2 or key in existing:
+            continue
+        existing[key] = item
+        merged.append({**item, "ord": len(merged), "source": "ai"})
+    parsed["requirements"] = merged
+
+    all_terms = list(parsed.get("terms", []))
+    for item in merged:
+        for term in item.get("terms", []):
+            if term not in all_terms:
+                all_terms.append(term)
+    parsed["terms"] = all_terms
+    return parsed
+
+
 def parse_jd(raw: str, company: str = "", title: str = "", city: str = "") -> dict:
     sections = split_sections(raw)
     items: list[Requirement] = []

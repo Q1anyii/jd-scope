@@ -3,7 +3,7 @@
 import { api } from "../api.js";
 import {
   state, toast, chipOf, pct, shortDate, STATUS_LABEL, DIM_LABEL, STATE_LABEL, PRIO_LABEL,
-  loadJobs, loadBoot, openJob, closeDetail,
+  loadJobs, loadBoot, openJob, closeDetail, openEditor,
 } from "../store.js";
 
 const { computed, ref, watch, onMounted, onBeforeUnmount } = window.Vue;
@@ -13,7 +13,7 @@ export const Jobs = {
   setup() {
     const s = state;
     const report = ref(null);
-    const busy = ref({ analyze: false, suggest: false, export: false, batch: 0 });
+    const busy = ref({ analyze: false, suggest: false, export: false, batch: 0, company: false });
 
     let timer = null;
     watch(() => s.jobQuery, () => {
@@ -121,6 +121,26 @@ export const Jobs = {
       } catch (err) { toast(err.message, "err"); }
     };
 
+    /* 一条龙入口：这份 JD 已经有公司档案就直接打开编辑器，没有就先建档（带 JD / 策略 / 报告） */
+    const makeCompany = async () => {
+      if (!s.detail) return;
+      const job = s.detail.job;
+      busy.value.company = true;
+      try {
+        const list = await api.listCompanies();
+        const found = (list.items || []).find((c) => c.job_id === job.id);
+        if (found) { openEditor(found.id); return; }
+        const res = await api.createCompany({
+          name: job.company,
+          job_id: job.id,
+          base_id: job.base_id || null,
+        });
+        toast(`已建档：${res.company.folder}`, "ok");
+        openEditor(res.company.id);
+      } catch (err) { toast(err.message, "err"); }
+      finally { busy.value.company = false; }
+    };
+
     const adopt = async (sug) => {
       try {
         await api.adoptSuggestion(sug.id, !sug.adopted);
@@ -146,6 +166,7 @@ export const Jobs = {
       s, report, busy, missingOf, dimList, reqGroups, coverage,
       STATUS_LABEL, PRIO_LABEL, STATE_LABEL, chipOf, pct, shortDate,
       setStatus, reanalyze, reanalyzeAll, suggest, exportReport, remove, adopt, open, closeDetail,
+      makeCompany,
     };
   },
   template: `
@@ -245,6 +266,9 @@ export const Jobs = {
             </select>
             <button class="ghost" @click="reanalyze" :disabled="busy.analyze">{{ busy.analyze ? '重算中…' : '重算' }}</button>
             <button class="ghost" @click="suggest" :disabled="busy.suggest">{{ busy.suggest ? '生成中…' : '生成改写建议' }}</button>
+            <button class="ghost" @click="makeCompany" :disabled="busy.company" title="建公司档案并打开简历编辑器">
+              {{ busy.company ? '准备中…' : '建公司档案 / 改简历' }}
+            </button>
             <button class="primary" @click="exportReport" :disabled="busy.export">{{ busy.export ? '导出中…' : '导出报告' }}</button>
             <button class="danger" @click="remove">删除</button>
           </div>
@@ -282,7 +306,7 @@ export const Jobs = {
                 </span>
               </div>
               <div>
-                <div class="txt">{{ r.text }}</div>
+                <div class="txt">{{ r.text }} <span class="badge plain" v-if="r.source === 'ai'">AI</span></div>
                 <div class="ev">{{ r.evidence || '' }}</div>
               </div>
             </div>

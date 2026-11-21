@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import aggregate, analyze, config, db, jdparse, llm, location, reportmd
+from . import aggregate, analyze, companies, config, db, jdparse, llm, location, reportmd
 from .config import APP_NAME, APP_VERSION, DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL, WEB_DIR, ensure_dirs
 from .lexicon import find_terms
 
@@ -125,6 +125,7 @@ class Api:
         if not code or not intent:
             return {"error": "基底代号与求职意向必填"}
         terms = sorted(set(find_terms(content)))
+        kind = companies.detect_kind(content)
         tags = body.get("tags") or []
         if isinstance(tags, str):
             tags = [t.strip() for t in re.split(r"[,，、\s]+", tags) if t.strip()]
@@ -132,8 +133,8 @@ class Api:
         try:
             try:
                 conn.execute(
-                    "INSERT INTO bases(code,intent,label,content,keywords,tags,coverage,created_at)"
-                    " VALUES(?,?,?,?,?,?,?,?)",
+                    "INSERT INTO bases(code,intent,label,content,keywords,tags,kind,coverage,created_at)"
+                    " VALUES(?,?,?,?,?,?,?,?,?)",
                     (
                         code,
                         intent,
@@ -141,6 +142,7 @@ class Api:
                         content,
                         json.dumps(terms, ensure_ascii=False),
                         json.dumps(tags, ensure_ascii=False),
+                        kind,
                         len(terms),
                         db.now(),
                     ),
@@ -191,6 +193,38 @@ class Api:
         )
         return parsed
 
+    # ---------- AI 解析（只出候选，勾选后才入库） ----------
+    @route("POST", r"/api/jobs/parse-ai")
+    def parse_ai(self, m, body, q):
+        raw = (body.get("jd_raw") or "").strip()
+        if len(raw) < 20:
+            return {"error": "JD 原文太短，至少 20 字"}
+        conn = self._conn()
+        try:
+            cfg = {
+                "base_url": db.get_setting(conn, "llm_base_url", DEFAULT_LLM_BASE_URL),
+                "model": db.get_setting(conn, "llm_model", DEFAULT_LLM_MODEL),
+                "api_key": db.get_setting(conn, "llm_api_key", ""),
+            }
+        finally:
+            conn.close()
+        if not cfg["api_key"]:
+            return {"error": "尚未配置模型 API Key，请先到「设置」页填写", "need_config": True}
+        result = llm.parse_jd_items(cfg, raw)
+        if result.get("error"):
+            return result
+        rule = jdparse.parse_jd(raw)
+        keys = {jdparse.normalize(r["text"]) for r in rule["requirements"]}
+        items = []
+        for it in result["items"]:
+            norm = jdparse.normalize_ai_items([it])
+            if not norm:
+                continue
+            item = norm[0]
+            item["duplicate"] = jdparse.normalize(item["text"]) in keys
+            items.append(item)
+        return {"items": items, "rule_count": len(rule["requirements"]), "model": cfg["model"]}
+
     @route("POST", r"/api/jobs")
     def create_job(self, m, body, q):
         raw = (body.get("jd_raw") or "").strip()
@@ -204,6 +238,9 @@ class Api:
                 title=body.get("title") or "",
                 city=body.get("city") or "",
             )
+            ai_items = jdparse.normalize_ai_items(body.get("ai_items") or [])
+            if ai_items:
+                parsed = jdparse.merge_ai_items(parsed, ai_items)
             if not parsed["company"] or not parsed["title"]:
                 return {"error": "公司名与岗位名至少要有一个能从 JD 里识别出来，请在表单里补上"}
             bases = [dict(r) for r in conn.execute("SELECT * FROM bases WHERE active=1")]
@@ -272,8 +309,8 @@ class Api:
         req_ids: dict[str, int] = {}
         for r in result["requirements"]:
             cur = conn.execute(
-                "INSERT INTO requirements(job_id,text,category,weight,terms,hit,evidence,priority,ord)"
-                " VALUES(?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO requirements(job_id,text,category,weight,terms,hit,evidence,priority,ord,source)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (
                     job_id,
                     r["text"],
@@ -284,6 +321,7 @@ class Api:
                     r.get("evidence", ""),
                     r.get("priority", "medium"),
                     r.get("ord", 0),
+                    r.get("source", "rule"),
                 ),
             )
             req_ids[r["text"]] = cur.lastrowid
@@ -407,6 +445,27 @@ class Api:
             bases = [dict(r) for r in conn.execute("SELECT * FROM bases WHERE active=1")]
             profile = db.get_profile(conn)
             parsed = jdparse.parse_jd(job["jd_raw"], job["company"], job["title"], job["city"])
+            # 重算时把此前勾选入库的 AI 条目一并带上，否则一重算就丢
+            ai_rows = conn.execute(
+                "SELECT text,category,weight,priority,terms,ord FROM requirements"
+                " WHERE job_id=? AND source='ai' ORDER BY ord",
+                (job_id,),
+            ).fetchall()
+            ai_items = []
+            for r in ai_rows:
+                ai_items.append(
+                    {
+                        "text": r["text"],
+                        "category": r["category"],
+                        "weight": r["weight"],
+                        "priority": r["priority"],
+                        "terms": json.loads(r["terms"] or "[]"),
+                        "ord": r["ord"],
+                        "source": "ai",
+                    }
+                )
+            if ai_items:
+                parsed = jdparse.merge_ai_items(parsed, jdparse.normalize_ai_items(ai_items))
             selection = analyze.pick_base(parsed["terms"], bases, parsed["title"])
             base = next((b for b in bases if b["id"] == job["base_id"]), None) or selection["base"]
             weights = json.loads(db.get_setting(conn, "weights", "{}") or "{}")
@@ -550,9 +609,9 @@ class Api:
                 return {"error": "缺口不存在"}
             cfg = self.settings_dict(conn)
             result = llm.answer_gap(cfg, g["requirement"], g["resume_state"], g["gap"])
-            if "answer" in result and result["answer"]:
-                conn.execute("UPDATE gaps SET answer=? WHERE id=?", (result["answer"], gid))
-                conn.commit()
+            # 只返回候选：写不写进台账由用户在界面上点「采用」决定
+            if "answer" in result:
+                result["candidate"] = True
             return result
         finally:
             conn.close()
@@ -577,6 +636,124 @@ class Api:
             if body:
                 cfg.update({k: body[k] for k in ("base_url", "model", "api_key") if body.get(k)})
             return llm.test_connection(cfg)
+        finally:
+            conn.close()
+
+    # ---------- 公司档案（一家公司一个文件夹） ----------
+    @route("GET", r"/api/companies")
+    def list_companies(self, m, body, q):
+        conn = self._conn()
+        try:
+            return {"items": companies.list_all(conn)}
+        finally:
+            conn.close()
+
+    @route("POST", r"/api/companies")
+    def create_company(self, m, body, q):
+        conn = self._conn()
+        try:
+            item = companies.create(
+                conn,
+                (body.get("name") or "").strip(),
+                int(body["job_id"]) if body.get("job_id") else None,
+                int(body["base_id"]) if body.get("base_id") else None,
+            )
+            return {"ok": True, "company": item}
+        except OSError as exc:
+            return {"error": f"建文件夹失败：{exc}"}
+        finally:
+            conn.close()
+
+    @route("GET", r"/api/companies/\d+")
+    def company_detail(self, m, body, q):
+        cid = int(m.group(0).split("/")[-1])
+        conn = self._conn()
+        try:
+            item = companies.detail(conn, cid)
+            if not item:
+                return {"error": "公司档案不存在"}
+            item["strategy"] = companies.read_strategy(conn, cid)
+            return item
+        finally:
+            conn.close()
+
+    @route("DELETE", r"/api/companies/\d+")
+    def delete_company(self, m, body, q):
+        cid = int(m.group(0).split("/")[-1])
+        conn = self._conn()
+        try:
+            return companies.delete_record(conn, cid)
+        finally:
+            conn.close()
+
+    @route("GET", r"/api/companies/\d+/resume")
+    def company_resume(self, m, body, q):
+        cid = int(m.group(0).split("/")[-2])
+        conn = self._conn()
+        try:
+            state = companies.resume_state(conn, cid)
+            if state is None:
+                return {"error": "尚未保存简历", "empty": True}
+            return state
+        finally:
+            conn.close()
+
+    @route("POST", r"/api/companies/\d+/resume")
+    def company_resume_save(self, m, body, q):
+        cid = int(m.group(0).split("/")[-2])
+        conn = self._conn()
+        try:
+            return companies.save_resume(conn, cid, body.get("state") or {})
+        finally:
+            conn.close()
+
+    @route("POST", r"/api/companies/\d+/export")
+    def company_export(self, m, body, q):
+        cid = int(m.group(0).split("/")[-2])
+        html = body.get("html") or ""
+        if len(html) < 200:
+            return {"error": "导出的 HTML 内容为空"}
+        conn = self._conn()
+        try:
+            return companies.save_export(conn, cid, html)
+        finally:
+            conn.close()
+
+    @route("POST", r"/api/companies/\d+/strategy")
+    def company_strategy_save(self, m, body, q):
+        cid = int(m.group(0).split("/")[-2])
+        conn = self._conn()
+        try:
+            return companies.save_strategy(conn, cid, body.get("text") or "")
+        finally:
+            conn.close()
+
+    @route("GET", r"/api/companies/\d+/base-html")
+    def company_base_html(self, m, body, q):
+        cid = int(m.group(0).split("/")[-2])
+        conn = self._conn()
+        try:
+            html = companies.base_html(conn, cid)
+            return {"html": html} if html else {"error": "没有待导入的基底", "empty": True}
+        finally:
+            conn.close()
+
+    @route("POST", r"/api/companies/\d+/adopt-base")
+    def company_adopt_base(self, m, body, q):
+        cid = int(m.group(0).split("/")[-2])
+        conn = self._conn()
+        try:
+            companies.adopt_base(conn, cid)
+            return {"ok": True}
+        finally:
+            conn.close()
+
+    @route("POST", r"/api/companies/\d+/open")
+    def company_open(self, m, body, q):
+        cid = int(m.group(0).split("/")[-2])
+        conn = self._conn()
+        try:
+            return companies.open_folder(conn, cid)
         finally:
             conn.close()
 
@@ -693,8 +870,8 @@ def make_handler(api: Api):
 
         def _static(self):
             rel = urlparse(self.path).path.lstrip("/") or "index.html"
-            if rel in ("", "/"):
-                rel = "index.html"
+            if rel in ("", "/") or rel.endswith("/"):
+                rel += "index.html"
             target = (WEB_DIR / rel).resolve()
             try:
                 target.relative_to(WEB_DIR.resolve())

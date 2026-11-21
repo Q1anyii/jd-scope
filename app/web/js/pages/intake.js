@@ -35,10 +35,15 @@ export const Intake = {
     const parsed = ref(null);
     const parsing = ref(false);
     const saving = ref(false);
+    const aiItems = ref([]);
+    const aiLoading = ref(false);
+    const aiNote = ref("");
 
     const fillSample = () => {
       jd.value = SAMPLE_JD;
       parsed.value = null;
+      aiItems.value = [];
+      aiNote.value = "";
     };
 
     const readFile = async (event) => {
@@ -46,6 +51,8 @@ export const Intake = {
       if (!file) return;
       jd.value = await file.text();
       parsed.value = null;
+      aiItems.value = [];
+      aiNote.value = "";
       event.target.value = "";
     };
 
@@ -75,6 +82,9 @@ export const Intake = {
       if (!parsed.value) { toast("先解析一次，确认抽取结果", "err"); return; }
       saving.value = true;
       try {
+        const picked = aiItems.value.filter((i) => i.picked).map((i) => ({
+          text: i.text, category: i.category, priority: i.priority, terms: i.terms,
+        }));
         const res = await api.createJob({
           jd_raw: jd.value.trim(),
           company: form.company.trim(),
@@ -82,10 +92,13 @@ export const Intake = {
           city: form.city.trim(),
           source: form.source.trim(),
           url: form.url.trim(),
+          ai_items: picked,
         });
-        toast(`已入库：匹配度 ${res.score}，${res.verdict}`, "ok");
+        toast(`已入库：匹配度 ${res.score}，${res.verdict}${picked.length ? `（含 ${picked.length} 条 AI 条目）` : ""}`, "ok");
         jd.value = "";
         parsed.value = null;
+        aiItems.value = [];
+        aiNote.value = "";
         Object.keys(form).forEach((k) => { form[k] = ""; });
         await loadBoot();
         await switchView("jobs");
@@ -97,11 +110,37 @@ export const Intake = {
       }
     };
 
+    /* AI 只出候选：这里不落库、不打分，等用户勾完再随表单一起提交 */
+    const askAi = async () => {
+      if (jd.value.trim().length < 20) { toast("JD 原文太短，至少 20 字", "err"); return; }
+      if (!parsed.value) await parse();
+      aiLoading.value = true;
+      aiNote.value = "";
+      try {
+        const data = await api.parseJdAi({ jd_raw: jd.value.trim() });
+        aiItems.value = (data.items || []).map((it) => ({ ...it, picked: !it.duplicate }));
+        aiNote.value = `模型 ${data.model || ""} 给出 ${aiItems.value.length} 条；规则已识别 ${data.rule_count} 条，重复项默认不勾`;
+        if (!aiItems.value.length) aiNote.value = "模型没有给出可用条目，换个模型或手工补";
+      } catch (err) {
+        aiItems.value = [];
+        aiNote.value = err.message;
+        toast(err.message, "err");
+      } finally {
+        aiLoading.value = false;
+      }
+    };
+
+    const toggleAll = (on) => {
+      aiItems.value.forEach((i) => { if (!i.duplicate) i.picked = on; });
+    };
+
+    const pickedCount = () => aiItems.value.filter((i) => i.picked).length;
+
     const grouped = (cat) => ((parsed.value && parsed.value.requirements) || []).filter((r) => r.category === cat);
 
     return {
-      s: state, form, jd, parsed, parsing, saving,
-      CAT_LABEL, PRIO_LABEL, grouped,
+      s: state, form, jd, parsed, parsing, saving, aiItems, aiLoading, aiNote,
+      CAT_LABEL, PRIO_LABEL, grouped, askAi, toggleAll, pickedCount,
       fillSample, readFile, parse, save,
     };
   },
@@ -109,7 +148,7 @@ export const Intake = {
   <div>
     <div class="view-head">
       <h1>JD 入库</h1>
-      <p>粘原文 → 解析预览 → 保存并分析。解析是纯本地规则抽取，不联网、不调模型；先看清抽到了什么，再决定要不要落库。</p>
+      <p>粘原文 → 解析预览 → 保存并分析。规则解析不联网；AI 解析只产出候选条目，勾哪条由你定，未勾的不入库、不参与打分。</p>
     </div>
 
     <div class="panel">
@@ -135,10 +174,41 @@ export const Intake = {
           <button class="primary" @click="parse" :disabled="parsing || !jd.trim()">
             {{ parsing ? '解析中…' : '解析预览' }}
           </button>
+          <button class="ghost" @click="askAi" :disabled="aiLoading || !jd.trim()">
+            {{ aiLoading ? 'AI 解析中…' : 'AI 补解析（出候选）' }}
+          </button>
           <button class="ghost" @click="save" :disabled="saving || !parsed">
             {{ saving ? '保存中…' : '保存并分析' }}
           </button>
           <span class="hint" v-if="!parsed">先解析，确认抽到的需求条目对不对</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" v-if="aiItems.length || aiLoading || aiNote">
+      <div class="panel-head">
+        <h2>AI 候选条目</h2>
+        <span class="hint" v-if="aiItems.length">已勾 {{ pickedCount() }} / {{ aiItems.length }}</span>
+        <div class="row-gap" v-if="aiItems.length">
+          <button class="mini" @click="toggleAll(true)">全选</button>
+          <button class="mini" @click="toggleAll(false)">清空</button>
+        </div>
+      </div>
+      <div class="pad-18">
+        <p class="hint">{{ aiLoading ? '正在请求模型…' : aiNote }}</p>
+        <div class="req-row" v-for="(it, i) in aiItems" :key="i">
+          <label class="check">
+            <input type="checkbox" v-model="it.picked" :disabled="it.duplicate">
+          </label>
+          <div>
+            <div class="txt">{{ it.text }}</div>
+            <div class="ev row-gap">
+              <span class="badge" :class="it.priority === 'high' ? 'high' : it.priority === 'medium' ? 'medium' : 'low'">{{ CAT_LABEL[it.category] || it.category }} · {{ PRIO_LABEL[it.priority] || it.priority }}</span>
+              <span class="badge plain" v-if="it.duplicate">规则已识别</span>
+              <span class="badge plain" v-for="t in (it.terms || [])" :key="t">{{ t }}</span>
+              <span class="hint" v-if="it.reason">{{ it.reason }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -32,6 +32,9 @@ export const state = reactive({
   gapQuery: "",
 
   bases: [],
+  companies: [],
+  companiesLoading: false,
+  companyDetail: null,
   toasts: [],
 });
 
@@ -130,6 +133,21 @@ export async function loadBases() {
 
 export async function loadDataDir() {
   state.dataDir = await api.dataDir();
+}
+
+export async function loadCompanies() {
+  state.companiesLoading = true;
+  try {
+    const data = await api.listCompanies();
+    state.companies = data.items || [];
+  } finally {
+    state.companiesLoading = false;
+  }
+}
+
+export function openEditor(id) {
+  // 同窗口切到编辑器：它和台帐同源，返回链接直接回首页，不需要另开浏览器
+  location.href = `/editor/?company=${id}`;
 }
 
 export async function openJob(id) {
