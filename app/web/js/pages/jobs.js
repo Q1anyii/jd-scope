@@ -13,7 +13,9 @@ export const Jobs = {
   setup() {
     const s = state;
     const report = ref(null);
-    const busy = ref({ analyze: false, suggest: false, export: false, batch: 0, company: false });
+    const busy = ref({ analyze: false, suggest: false, export: false, batch: 0, company: false, edit: false });
+    const editing = ref(false);
+    const form = ref({ company: "", title: "", city: "", source: "", url: "" });
 
     let timer = null;
     watch(() => s.jobQuery, () => {
@@ -58,6 +60,47 @@ export const Jobs = {
         await loadBoot();
         await loadJobs();
       } catch (err) { toast(err.message, "err"); }
+    };
+
+    const startEdit = () => {
+      const job = s.detail.job;
+      form.value = {
+        company: job.company || "",
+        title: job.title || "",
+        city: job.city || "",
+        source: job.source || "",
+        url: job.url || "",
+      };
+      editing.value = true;
+    };
+
+    const cancelEdit = () => { editing.value = false; };
+
+    const toggleEdit = () => { if (editing.value) editing.value = false; else startEdit(); };
+
+    const saveEdit = async () => {
+      const id = s.detail.job.id;
+      const f = form.value;
+      if (!f.company.trim() || !f.title.trim()) {
+        toast("公司名和岗位名不能为空", "err");
+        return;
+      }
+      busy.value.edit = true;
+      try {
+        await api.updateJob(id, {
+          company: f.company.trim(),
+          title: f.title.trim(),
+          city: f.city.trim(),
+          source: f.source.trim(),
+          url: f.url.trim(),
+        });
+        editing.value = false;
+        await openJob(id);
+        await loadJobs();
+        await loadBoot();
+        toast("岗位信息已更新", "ok");
+      } catch (err) { toast(err.message, "err"); }
+      finally { busy.value.edit = false; }
     };
 
     const reanalyze = async () => {
@@ -150,6 +193,7 @@ export const Jobs = {
 
     const open = async (id) => {
       report.value = null;
+      editing.value = false;
       try { await openJob(id); } catch (err) { toast(err.message, "err"); }
     };
 
@@ -163,9 +207,10 @@ export const Jobs = {
     onBeforeUnmount(() => document.removeEventListener("keydown", onKey));
 
     return {
-      s, report, busy, missingOf, dimList, reqGroups, coverage,
+      s, report, busy, editing, form, missingOf, dimList, reqGroups, coverage,
       STATUS_LABEL, PRIO_LABEL, STATE_LABEL, chipOf, pct, shortDate,
-      setStatus, reanalyze, reanalyzeAll, suggest, exportReport, remove, adopt, open, closeDetail,
+      setStatus, startEdit, cancelEdit, toggleEdit, saveEdit,
+      reanalyze, reanalyzeAll, suggest, exportReport, remove, adopt, open, closeDetail,
       makeCompany,
     };
   },
@@ -244,6 +289,32 @@ export const Jobs = {
         </div>
 
         <div class="drawer-body">
+          <div v-if="editing" class="edit-panel">
+            <div class="section-title" style="margin-top:0">修改岗位信息</div>
+            <div class="form-grid">
+              <label class="field">公司名
+                <input v-model="form.company" placeholder="公司名称">
+              </label>
+              <label class="field">岗位名
+                <input v-model="form.title" placeholder="如 AI 应用开发工程师">
+              </label>
+              <label class="field">城市
+                <input v-model="form.city" placeholder="如 杭州">
+              </label>
+              <label class="field">来源
+                <input v-model="form.source" placeholder="官网 / BOSS / 内推">
+              </label>
+              <label class="field span2">链接
+                <input v-model="form.url" placeholder="岗位链接（可选）">
+              </label>
+            </div>
+            <div class="row-gap" style="margin-top:12px">
+              <button class="primary" @click="saveEdit" :disabled="busy.edit">{{ busy.edit ? '保存中…' : '保存修改' }}</button>
+              <button class="ghost" @click="cancelEdit" :disabled="busy.edit">取消</button>
+              <span class="hint">只改元信息，不会重算 JD 需求；改岗位名不会重命名已建的公司文件夹。</span>
+            </div>
+          </div>
+
           <div class="dims">
             <div class="dim" v-for="d in dimList" :key="d.key">
               <div class="k">{{ d.label }}</div>
@@ -261,6 +332,7 @@ export const Jobs = {
           </div>
 
           <div class="row-gap mt12">
+            <button class="ghost" @click="toggleEdit">{{ editing ? '收起编辑' : '编辑信息' }}</button>
             <select :value="s.detail.job.status" style="width:132px" @change="setStatus($event.target.value)">
               <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">{{ label }}</option>
             </select>

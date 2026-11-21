@@ -412,10 +412,16 @@ class Api:
         job_id = int(m.group(0).split("/")[-1])
         conn = self._conn()
         try:
-            allowed = {"status", "decision", "decision_note", "city", "url", "source"}
+            allowed = {"company", "title", "status", "decision", "decision_note",
+                       "city", "url", "source"}
+            for k in ("company", "title"):
+                if k in body and not str(body[k] or "").strip():
+                    return {"error": "公司名和岗位名不能为空"}
             for k in list(body):
                 if k in allowed:
-                    conn.execute(f"UPDATE jobs SET {k}=?, updated_at=? WHERE id=?", (body[k], db.now(), job_id))
+                    value = str(body[k]).strip() if isinstance(body[k], str) else body[k]
+                    conn.execute(f"UPDATE jobs SET {k}=?, updated_at=? WHERE id=?",
+                                 (value, db.now(), job_id))
             conn.commit()
             return {"ok": True}
         finally:

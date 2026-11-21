@@ -94,9 +94,31 @@ base.html       HTML 基底原文，编辑器首次导入后删除
 6. JD 预灌最初放在 `if(loaded)` 渲染之后，`state.ai.jd` 有值但设置面板已画完，输入框仍显示空占位；改为在 `renderEditor()` 之前赋值，空白档案分支补一次 `renderEditor()`。
 7. 代理错误里 `error` 是字符串而不是 OpenAI 的 `{error:{message}}`，前端取值要兼容两种形状，否则只显示「HTTP 400」。
 
+## 7. 补充：打印空白页、岗位信息编辑、导出后打开文件夹
+
+**打印一页内容变成两页**
+
+- 现象：A4 预览显示「单页 · 余 488pt」，打印机 / 另存为 PDF 却出两页，第二页是空白。
+- 根因不是内容超长，而是打印 CSS 仍保留 `.page { min-height:297mm }`：A4 盒子的高度正好等于纸张高度，浏览器按 0.1px 的舍入差判成溢出，末尾多切一页。
+- 修复：`@media print` 里把 `.page` 的 `min-height` / `height` 交还内容（`min-height:0; height:auto`），同时给 `html/body` 归零高度。
+- 复现/验收：同一份 488pt 简历，修复前 `chrome --print-to-pdf` 生成 2 页，修复后 1 页。
+
+**岗位信息可编辑**
+
+- 详情抽屉新增「编辑信息」：公司名、岗位名、城市、来源、链接都能改；保存后 `PATCH /api/jobs/<id>` 更新并刷新详情与列表。
+- 后端原来只允许 status / decision / city / url / source，这次把 `company` / `title` 加入白名单，并对空公司名、空岗位名直接拒绝。
+- 只改元信息，不重算 JD 需求；改岗位名不会重命名已建的公司文件夹，避免误动用户文件。
+
+**导出后的提示条带文件夹按钮**
+
+- 编辑器提示条改成可带一个右侧动作按钮；`toast(msg, action)` 生成按钮并延长到 5.2s，按钮单独 `pointer-events:auto`，不影响其他 toast 点击穿透。
+- 「保存简历 HTML 到公司档案」成功后，提示条右侧出现「打开文件夹」，调用 `POST /api/companies/<id>/open` 直接打开公司档案目录。
+- 打印媒体里继续隐藏 `.toast`，按钮不会进 PDF。
+
 ## 验收
 
-- `python -m unittest discover -s tests`：**60 用例全绿**（新增 4：代理无 Key 拒绝、代理读 App 设置、非法 messages、公司 JD 回灌）。
+- `python -m unittest discover -s tests`：**62 用例全绿**（新增岗位编辑 2 个：元信息更新、空值拒绝）。
 - 本地 stub 模型端到端：`POST /api/settings` 指向 `127.0.0.1:8899/v1` → `POST /api/editor/chat` 返回 `{"ok":true,"content":"{\"changes\": []}"}`。
+- 打印：修复前 2 页 / 修复后 1 页（同一份 488pt 简历，Chrome `--print-to-pdf`）。
 - 早前端到端实测：HTML 基底 → 建档 → 打开编辑器 → 自动解析出 2 个模块（姓名「张三」）→ `resume.json` 落盘 3555B → `base.html` 已删除。
 - 截图：`docs/ui-companies.png`、`docs/ui-editor.png`；另以 1920×1080 检查宽屏铺满。
