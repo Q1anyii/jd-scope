@@ -69,6 +69,29 @@ def _say(obj: dict) -> None:
         pass
 
 
+class _Bridge:
+    """暴露给前端的原生能力。只有 pywebview 窗口里才有，浏览器回退模式会缺失。"""
+
+    def choose_folder(self, current: str = "") -> str:
+        try:
+            import webview  # type: ignore
+            from webview import FileDialog  # type: ignore
+        except Exception:
+            return ""
+        try:
+            window = webview.windows[0] if webview.windows else None
+            if window is None:
+                return ""
+            result = window.create_file_dialog(
+                FileDialog.FOLDER, directory=current or "", allow_multiple=False
+            )
+            if not result:
+                return ""
+            return result[0] if isinstance(result, (list, tuple)) else str(result)
+        except Exception:
+            return ""
+
+
 def _run_webview(url: str) -> bool:
     try:
         import webview  # type: ignore
@@ -82,6 +105,7 @@ def _run_webview(url: str) -> bool:
             height=900,
             min_size=(1080, 720),
             text_select=True,
+            js_api=_Bridge(),
         )
         webview.start()
         return True

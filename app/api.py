@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import aggregate, analyze, db, jdparse, llm, reportmd
+from . import aggregate, analyze, config, db, jdparse, llm, location, reportmd
 from .config import APP_NAME, APP_VERSION, DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL, WEB_DIR, ensure_dirs
 from .lexicon import find_terms
 
@@ -31,7 +31,7 @@ class Api:
     """把处理函数挂成方法，便于 BaseHTTPRequestHandler 反射调用。"""
 
     def __init__(self) -> None:
-        self.data_home = ensure_dirs()
+        ensure_dirs()
         with db.connect() as conn:
             db.init_db(conn)
 
@@ -53,7 +53,13 @@ class Api:
     # ---------- 基础 ----------
     @route("GET", r"/api/health")
     def health(self, m, body, q):
-        return {"ok": True, "app": APP_NAME, "version": APP_VERSION, "data_home": str(self.data_home)}
+        return {
+            "ok": True,
+            "app": APP_NAME,
+            "version": APP_VERSION,
+            "data_home": str(config.data_home()),
+            "data_home_source": config.data_home_source(),
+        }
 
     @route("GET", r"/api/bootstrap")
     def bootstrap(self, m, body, q):
@@ -307,7 +313,9 @@ class Api:
         try:
             status = (q.get("status") or [""])[0]
             kw = (q.get("q") or [""])[0].strip()
-            sql = "SELECT id,company,title,city,status,decision,base_id,score,verdict,created_at FROM jobs"
+            sort = (q.get("sort") or [""])[0]
+            sql = ("SELECT id,company,title,city,status,decision,base_id,score,verdict,"
+                   "score_json,created_at FROM jobs")
             cond, args = [], []
             if status:
                 cond.append("status=?")
@@ -318,7 +326,13 @@ class Api:
                 args.append(f"%{kw}%")
             if cond:
                 sql += " WHERE " + " AND ".join(cond)
-            sql += " ORDER BY id DESC"
+            # 排序白名单，避免把参数拼进 SQL
+            order = {
+                "score": "score DESC, id DESC",
+                "score_asc": "score ASC, id DESC",
+                "oldest": "id ASC",
+            }.get(sort, "id DESC")
+            sql += " ORDER BY " + order
             rows = [dict(r) for r in conn.execute(sql, args)]
             for r in rows:
                 r["score_json"] = json.loads(r.get("score_json") or "{}")
@@ -460,7 +474,7 @@ class Api:
                 uncovered=aggregate.uncovered_skills(conn, 2)[:6],
             )
             safe = re.sub(r"[\\/:*?\"<>|]", "-", f"{job['company']}-{job['title']}")[:60]
-            path = self.data_home / "reports" / f"{job_id:03d}-{safe}.md"
+            path = config.ensure_dirs() / "reports" / f"{job_id:03d}-{safe}.md"
             path.write_text(text, encoding="utf-8")
             return {"ok": True, "markdown": text, "path": str(path)}
         finally:
@@ -603,6 +617,36 @@ class Api:
             return {"ok": True}
         finally:
             conn.close()
+
+    # ---------- 数据位置 ----------
+    @route("GET", r"/api/data-dir")
+    def get_data_dir(self, m, body, q):
+        return location.describe()
+
+    @route("POST", r"/api/data-dir")
+    def set_data_dir(self, m, body, q):
+        try:
+            return location.switch_to(body.get("path") or "", bool(body.get("migrate", True)))
+        except location.SwitchError as exc:
+            return {"error": str(exc)}
+        except OSError as exc:
+            return {"error": f"文件系统拒绝：{exc}"}
+
+    @route("POST", r"/api/data-dir/reset")
+    def reset_data_dir(self, m, body, q):
+        try:
+            return location.reset(bool(body.get("migrate", True)))
+        except location.SwitchError as exc:
+            return {"error": str(exc)}
+        except OSError as exc:
+            return {"error": f"文件系统拒绝：{exc}"}
+
+    @route("POST", r"/api/data-dir/open")
+    def open_data_dir(self, m, body, q):
+        try:
+            return location.open_folder()
+        except location.SwitchError as exc:
+            return {"error": str(exc)}
 
 
 # ---------------- HTTP 外壳 ----------------

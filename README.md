@@ -21,6 +21,20 @@ JDScope 只做中间这一层：**决策层**。
 - **不做自动投递与爬虫**：那是投递工具的事，且平台风控风险高。
 - **不做「一键生成简历」**：本工具的红线是「只改表达、不动事实」，一键生成必然越界。
 
+## 界面
+
+概览（跨岗位聚合）：
+
+![概览](docs/ui-overview.png)
+
+岗位详情（四维得分、逐条命中证据、缺口、改写建议）：
+
+![岗位详情](docs/ui-job-detail.png)
+
+设置（数据位置可改到任意盘）：
+
+![设置](docs/ui-settings.png)
+
 ## 核心能力
 
 | 能力 | 说明 |
@@ -32,6 +46,7 @@ JDScope 只做中间这一层：**决策层**。
 | 跨岗位聚合 | 技能需求榜（要求家数 vs 我的覆盖）、缺口热点、基底表现、城市分布 |
 | 交付物 | 一键生成 Markdown 报告：结论 / 四维 / 选型理由 / 关键词覆盖 / 缺口 / 改动摘要 / 面试提示 |
 | 可选模型 | OpenAI 兼容端点（默认 DeepSeek），用于改写建议与面试应答口径；不配置也能用 |
+| 数据位置可选 | 设置页可把数据库与报告改到任意盘；空目录自动迁移，已有库目录直接接管，不覆盖 |
 
 ## 快速开始
 
@@ -68,12 +83,20 @@ pip install -r requirements.txt
 默认 `%LOCALAPPDATA%\JDScope\`：
 
 ```
-jdscope.db      SQLite（岗位、需求条目、缺口、基底、设置）
-reports\        导出的 Markdown 报告
-backups\        预留
+location.json  位置指针（只在自定义或改回默认时出现）
+jdscope.db     SQLite（岗位、需求条目、缺口、基底、设置）
+reports\       导出的 Markdown 报告
+backups\       预留
 ```
 
-可用环境变量 `JDSCOPE_HOME` 改到任意目录。备份直接复制该目录即可。
+三种改法，优先级从高到低：
+
+1. **设置页可视化切换**（推荐）：选一个空目录 → 自动迁移数据库、报告与备份；选已有数据库的目录 → 直接接管，不覆盖、会先提示冲突。
+2. 环境变量 `JDSCOPE_HOME`：整目录隔离，设置页会标记为「环境变量指定」并锁定切换。
+3. 手动编辑 `location.json` 的 `data_home` 字段（路径须为绝对路径）。
+
+设计上把「指针」和「数据」分开：`location.json` 永远待在配置根，所以不会出现「指针存在被指针指向的目录里」这种死循环。
+切换不会重启进程，下一次请求自然连到新库。备份直接复制数据目录即可。
 本项目仓库内不含任何个人数据、不含任何绝对路径。
 
 ## 评分口径
@@ -104,13 +127,14 @@ powershell -ExecutionPolicy Bypass -File build\build_exe.ps1
 python -m unittest discover -s tests -v
 ```
 
-覆盖词表最长匹配、JD 三段切分、硬性条件判定、基底选型、聚合统计、报告结构。
+覆盖词表最长匹配、JD 三段切分、硬性条件判定、基底选型、聚合统计、报告结构、数据目录切换（迁移 / 接管 / 冲突拒绝 / 环境变量锁定 / 指针损坏回退）与 HTTP 接口链路。
 
 ## 目录
 
 ```
 app/
-  config.py      路径与常量（数据目录、权重、阈值）
+  config.py      路径与常量（配置根、数据目录指针、权重、阈值）
+  location.py    数据目录切换：校验、迁移、接管、原子落指针
   lexicon.py     通用技术词表与检索归一
   jdparse.py     JD 结构化抽取
   analyze.py     基底选型 + 四维评分 + 缺口差集
@@ -118,8 +142,12 @@ app/
   reportmd.py    交付物 Markdown
   llm.py         可选的 OpenAI 兼容客户端（严格 JSON）
   api.py         纯标准库 HTTP 接口
-  main.py        桌面入口（WebView2 / --app / 浏览器三级回退）
-  web/           前端（原生 JS，无构建）
+  main.py        桌面入口（WebView2 / --app / 浏览器三级回退，含选目录桥）
+  web/
+    index.html   壳
+    css/app.css  单文件设计系统
+    js/          Vue 3 页面组件（store + 6 个页面）
+    vendor/      Vue 3.5.13 全局构建（MIT，随仓库分发，不依赖 Node）
 tools/
   make_icon.py       纯标准库绘制多尺寸 ico（无源图时的回退）
   png_to_ico.py      源图转 ico：裁边、圆角外透明、小尺寸简化
@@ -129,6 +157,9 @@ build/
 samples/             合成样例数据（非真实个人信息）
 tests/               单元测试
 ```
+
+前端用 Vue 3 的全局构建（`vue.global.prod.js`，运行时编译模板），**没有 Node、没有构建步**：
+页面上就是 7 个可读的 `.js` 文件，改完刷新即可生效，打包时 `--add-data app\web` 原样带走。
 
 ## 已知限制
 

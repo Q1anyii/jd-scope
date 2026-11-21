@@ -279,7 +279,8 @@ class HttpCase(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/", timeout=15) as resp:
             html = resp.read().decode("utf-8")
         self.assertIn("JDScope", html)
-        self.assertIn("/app.js", html)
+        self.assertIn("/js/main.js", html)
+        self.assertIn("/vendor/vue.global.prod.js", html)
 
 
 class TestReanalyzeKeepsGapProgress(HttpCase):
