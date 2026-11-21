@@ -243,5 +243,81 @@ class TestPipelineAndAggregate(unittest.TestCase):
         self.assertIn("只改表达、不动事实", md)
 
 
+class HttpCase(unittest.TestCase):
+    """起一个真实 HTTP 服务，走完整接口链路。"""
+
+    @classmethod
+    def setUpClass(cls):
+        import threading
+
+        from app.api import make_server
+
+        cls.httpd = make_server(0)
+        cls.base = f"http://127.0.0.1:{cls.httpd.server_address[1]}"
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    def call(self, path, method="GET", body=None):
+        import urllib.request
+
+        data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            self.base + path, data=data, method=method,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def test_health_and_static(self):
+        self.assertTrue(self.call("/api/health")["ok"])
+        import urllib.request
+        with urllib.request.urlopen(self.base + "/", timeout=15) as resp:
+            html = resp.read().decode("utf-8")
+        self.assertIn("JDScope", html)
+        self.assertIn("/app.js", html)
+
+
+class TestReanalyzeKeepsGapProgress(HttpCase):
+    def test_gap_status_and_answer_survive_recalc(self):
+        # 清空库，准备一份基底
+        conn = db.connect()
+        db.init_db(conn)
+        for t in ("jobs", "requirements", "gaps", "suggestions", "bases"):
+            conn.execute(f"DELETE FROM {t}")
+        conn.commit()
+        conn.close()
+
+        self.call("/api/profile", "POST", {"education": "本科", "years": 2, "cities": "深圳"})
+        self.call("/api/bases", "POST", {
+            "code": "ai-app", "intent": "AI 应用开发工程师", "content": DEMO_RESUME,
+        })
+        job = self.call("/api/jobs", "POST", {"jd_raw": DEMO_JD})
+        self.assertTrue(job.get("ok"), job)
+
+        detail = self.call(f"/api/jobs/{job['job_id']}")
+        self.assertGreater(len(detail["gaps"]), 0)
+        gap_id = detail["gaps"][0]["id"]
+
+        self.call(f"/api/gaps/{gap_id}", "PATCH", {"status": "learning", "answer": "已开始补课"})
+        self.call(f"/api/jobs/{job['job_id']}/analyze", "POST", {})
+
+        after = self.call(f"/api/jobs/{job['job_id']}")
+        matched = [g for g in after["gaps"] if g["requirement"] == detail["gaps"][0]["requirement"]]
+        self.assertEqual(len(matched), 1)
+        self.assertEqual(matched[0]["status"], "learning")
+        self.assertEqual(matched[0]["answer"], "已开始补课")
+
+    def test_export_returns_markdown(self):
+        job = self.call("/api/jobs", "POST", {"jd_raw": DEMO_JD})
+        md = self.call(f"/api/jobs/{job['job_id']}/export", "POST", {})
+        self.assertIn("岗位匹配报告", md["markdown"])
+        self.assertTrue(Path(md["path"]).exists())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -82,7 +82,6 @@ async function loadBootstrap() {
   renderChips(S.boot.summary);
   renderProfileForm(S.boot.profile);
   renderSettingsForm(S.boot.settings);
-  renderBaseOptions();
 }
 
 function renderChips(sum) {
@@ -582,10 +581,6 @@ async function renderBases() {
       } catch (e) { toast(e.message, "err"); }
     });
   });
-}
-
-function renderBaseOptions() {
-  // 供后续可能的基底切换使用；当前由后端自动选型
 }
 
 function initBases() {

@@ -254,6 +254,13 @@ class Api:
             conn.close()
 
     def _persist_analysis(self, conn, job_id: int, parsed: dict, result: dict) -> None:
+        # 重算时保留人工维护的缺口进度（状态 / 应答口径 / 补课方向）
+        prev: dict[str, tuple[str, str, str]] = {}
+        for g in conn.execute(
+            "SELECT requirement, status, answer, action FROM gaps WHERE job_id=?", (job_id,)
+        ):
+            prev[g["requirement"]] = (g["status"], g["answer"], g["action"])
+
         conn.execute("DELETE FROM requirements WHERE job_id=?", (job_id,))
         conn.execute("DELETE FROM gaps WHERE job_id=?", (job_id,))
         req_ids: dict[str, int] = {}
@@ -275,7 +282,8 @@ class Api:
             )
             req_ids[r["text"]] = cur.lastrowid
         for g in result["gaps"]:
-            conn.execute(
+            status, answer, action = prev.get(g["requirement"], ("open", "", ""))
+            gap_id = conn.execute(
                 "INSERT INTO gaps(job_id,req_id,requirement,resume_state,gap,priority,action,answer,status,created_at)"
                 " VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (
@@ -285,12 +293,13 @@ class Api:
                     g["resume_state"],
                     g["gap"],
                     g["priority"],
-                    g["action"],
-                    "",
-                    "open",
+                    action or g["action"],
+                    answer,
+                    status or "open",
                     db.now(),
                 ),
-            )
+            ).lastrowid
+            del gap_id
 
     @route("GET", r"/api/jobs")
     def list_jobs(self, m, body, q):
