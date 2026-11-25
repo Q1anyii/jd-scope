@@ -12,13 +12,14 @@ from pathlib import Path
 
 from .config import db_path, ensure_dirs
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # v2 相对 v1 的增量：老库启动时按列补齐，不重建、不清数据
 COLUMN_PATCHES = (
     ("bases", "kind", "kind TEXT DEFAULT 'html'"),
     ("requirements", "source", "source TEXT DEFAULT 'rule'"),
     ("companies", "kind", "kind TEXT DEFAULT 'company'"),
+    ("profile", "age", "age INTEGER DEFAULT 0"),
 )
 
 DDL = """
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS profile (
     education TEXT DEFAULT '',
     major TEXT DEFAULT '',
     years REAL DEFAULT 0,
+    age INTEGER DEFAULT 0,
     cities TEXT DEFAULT '',
     certs TEXT DEFAULT '',
     notes TEXT DEFAULT '',
@@ -163,8 +165,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     row = conn.execute("SELECT v FROM meta WHERE k='schema_version'").fetchone()
     if row is None:
         cur = conn.execute(
-            "INSERT OR IGNORE INTO profile(id, education, major, years, cities, certs, notes, updated_at)"
-            " VALUES(1, '', '', 0, '', '', '', ?)",
+            "INSERT OR IGNORE INTO profile(id, education, major, years, age, cities, certs, notes, updated_at)"
+            " VALUES(1, '', '', 0, 0, '', '', '', ?)",
             (now(),),
         )
         del cur
@@ -204,12 +206,13 @@ def get_profile(conn: sqlite3.Connection) -> dict:
 
 def save_profile(conn: sqlite3.Connection, data: dict) -> None:
     conn.execute(
-        "UPDATE profile SET education=?, major=?, years=?, cities=?, certs=?, notes=?, updated_at=?"
+        "UPDATE profile SET education=?, major=?, years=?, age=?, cities=?, certs=?, notes=?, updated_at=?"
         " WHERE id=1",
         (
             data.get("education", ""),
             data.get("major", ""),
             float(data.get("years", 0) or 0),
+            int(data.get("age", 0) or 0),
             data.get("cities", ""),
             data.get("certs", ""),
             data.get("notes", ""),

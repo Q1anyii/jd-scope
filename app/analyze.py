@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 from .config import DEFAULT_WEIGHTS, VERDICT_GO, VERDICT_MAYBE
-from .lexicon import DOMAIN_TERMS, EDU_LEVEL, TERM_DOMAIN, find_terms, normalize
+from .lexicon import CITIES, DOMAIN_TERMS, EDU_LEVEL, TERM_DOMAIN, find_terms, normalize
 
 STATUS_LABELS = {
     "new": "待处理",
@@ -39,8 +39,14 @@ def base_terms(base: dict) -> list[str]:
     return sorted(terms)
 
 
-def _req_hit(req: dict, corpus: set[str]) -> tuple[int, str]:
-    """返回 (命中等级 0/1/2, 证据文本)。"""
+def _req_hit(req: dict, corpus: set[str]) -> tuple[int | None, str]:
+    """返回 (命中等级 0/1/2 或 None, 证据文本)。
+
+    None 表示这条要求没有可对照的技术术语（例如「有责任心」「沟通顺畅」），
+    不能当成「缺失」拉低覆盖率，也不该生成补课缺口。
+    """
+    if not req.get("terms"):
+        return None, "无可比对术语，未计入覆盖率"
     exact = [t for t in req.get("terms", []) if t in corpus]
     if exact:
         return 2, "命中：" + "、".join(exact)
@@ -54,9 +60,7 @@ def _req_hit(req: dict, corpus: set[str]) -> tuple[int, str]:
             partial.append(f"{t}（同领域已有：{'、'.join(siblings[:3])}）")
     if partial:
         return 1, "部分：" + "；".join(partial[:2])
-    if req.get("terms"):
-        return 0, "未命中：" + "、".join(req["terms"][:3])
-    return 0, "无可比对术语"
+    return 0, "未命中：" + "、".join(req["terms"][:3])
 
 
 def pick_base(jd_terms: list[str], bases: list[dict], jd_title: str = "") -> dict:
@@ -111,6 +115,37 @@ def pick_base(jd_terms: list[str], bases: list[dict], jd_title: str = "") -> dic
     }
 
 
+def _city_key(text: str) -> str:
+    """把「惠州 - 惠东县」收敛成城市名，避免因为多写了区县而判成未知。"""
+    raw = (text or "").strip()
+    for city in CITIES:
+        if city in raw:
+            return city
+    return raw
+
+
+MAJOR_GROUPS = (
+    ("计算机类", ("计算机", "软件", "软件工程", "信息安全", "网络工程", "人工智能",
+                 "数据科学", "物联网", "数字媒体", "智能科学")),
+    ("电子信息类", ("电子", "通信", "信息工程", "微电子", "光电", "自动化")),
+    ("自动化类", ("自动化", "控制", "机器人")),
+    ("数学类", ("数学", "统计", "应用统计")),
+    ("统计学类", ("统计",)),
+    ("信息管理与信息系统", ("信息管理", "信息系统", "管理科学")),
+)
+
+
+def _major_related(my_major: str, requirement: str) -> bool:
+    mine = normalize(my_major)
+    need = normalize(requirement)
+    if mine and mine in need:
+        return True
+    for group, members in MAJOR_GROUPS:
+        if group in requirement and any(normalize(m) in mine for m in members):
+            return True
+    return False
+
+
 def _score_constraints(constraints: list[dict], profile: dict, jd_city: str) -> list[dict]:
     """硬性条件逐项判定：pass / partial / fail / unknown。"""
     results = []
@@ -118,6 +153,9 @@ def _score_constraints(constraints: list[dict], profile: dict, jd_city: str) -> 
     years = float(profile.get("years") or 0)
     certs = (profile.get("certs") or "")
     cities = [c.strip() for c in normalize_city_list(profile.get("cities") or "")]
+    my_major = (profile.get("major") or "").strip()
+    age = int(profile.get("age") or 0)
+    city_key = _city_key(jd_city)
 
     for c in constraints:
         kind = c.get("kind")
@@ -139,6 +177,36 @@ def _score_constraints(constraints: list[dict], profile: dict, jd_city: str) -> 
                 state, note = "partial", f"年限 {years} 年，低于「{c.get('text')}」"
             else:
                 state, note = "unknown", "未填写工作年限，无法判定"
+        elif kind == "major":
+            text = c.get("text") or "专业要求"
+            if c.get("unlimited"):
+                state, note = "pass", "专业不限"
+            elif not my_major:
+                state, note = "unknown", "未填写专业，无法判定"
+            elif _major_related(my_major, text):
+                state, note = "pass", f"「{my_major}」属于 JD 要求的相关专业范围"
+            else:
+                state, note = "partial", f"「{my_major}」与 JD 专业范围不完全一致，建议人工确认"
+        elif kind == "age":
+            rules = c.get("rules") or []
+            if not age:
+                state, note = "unknown", "未填写年龄，无法判定"
+            elif not rules:
+                state, note = "unknown", "JD 写了年龄要求，但没抽出数字"
+            else:
+                applicable = [
+                    r for r in rules
+                    if r.get("degree") and EDU_LEVEL.get(r["degree"]) == edu_level
+                ]
+                if not applicable:
+                    applicable = [r for r in rules if not r.get("degree")] or rules
+                limit = min(int(r.get("max") or 0) for r in applicable if r.get("max"))
+                if not limit:
+                    state, note = "unknown", "年龄要求缺少明确上限"
+                elif age <= limit:
+                    state, note = "pass", f"年龄 {age} 未超过 JD 标注上限 {limit}"
+                else:
+                    state, note = "partial", f"年龄 {age} 超过 JD 标注上限 {limit}，建议核实是否硬性"
         elif kind == "english":
             text = c.get("text") or ""
             high = any(k in text for k in ("六级", "CET-6", "CET6", "雅思", "托福"))
@@ -149,9 +217,10 @@ def _score_constraints(constraints: list[dict], profile: dict, jd_city: str) -> 
             else:
                 state, note = "unknown", "未填写英语证书"
         elif kind == "city":
+            value = _city_key(c.get("value") or "")
             if not cities:
                 state, note = "unknown", "未填写意向城市"
-            elif c.get("value") in cities:
+            elif value in cities:
                 state, note = "pass", f"「{c.get('value')}」在意向城市内"
             else:
                 state, note = "partial", f"「{c.get('value')}」不在意向城市内"
@@ -161,7 +230,7 @@ def _score_constraints(constraints: list[dict], profile: dict, jd_city: str) -> 
         if kind == "city" and jd_city:
             if not cities:
                 state, note = "unknown", "未填写意向城市"
-            elif jd_city in cities:
+            elif city_key in cities:
                 state, note = "pass", f"JD 城市「{jd_city}」在意向城市内"
             else:
                 state, note = "partial", f"JD 城市「{jd_city}」不在意向城市内"
@@ -172,7 +241,7 @@ def _score_constraints(constraints: list[dict], profile: dict, jd_city: str) -> 
         label = f"城市：{jd_city}"
         if not cities:
             results.append({"kind": "city", "value": jd_city, "text": label, "state": "unknown", "note": "未填写意向城市"})
-        elif jd_city in cities:
+        elif city_key in cities:
             results.append({"kind": "city", "value": jd_city, "text": label, "state": "pass", "note": f"JD 城市「{jd_city}」在意向城市内"})
         else:
             results.append({"kind": "city", "value": jd_city, "text": label, "state": "partial", "note": f"JD 城市「{jd_city}」不在意向城市内"})
@@ -199,7 +268,7 @@ def evaluate(jd: dict, base: dict | None, profile: dict, weights: dict | None = 
 
     dims = {}
     for cat in ("must", "duty", "nice"):
-        pool = [r for r in reqs if r["category"] == cat]
+        pool = [r for r in reqs if r["category"] == cat and r["hit"] is not None]
         if not pool:
             dims[cat] = None
             continue
@@ -225,6 +294,10 @@ def evaluate(jd: dict, base: dict | None, profile: dict, weights: dict | None = 
         verdict = "不建议投"
         reason = "硬性条件不满足：" + "；".join(c.get("note", "") for c in hard_fail)
         decision_hint = "skip"
+    elif not any(r["hit"] is not None for r in reqs):
+        verdict = "待核对"
+        reason = "JD 未抽出可对照的技术要求，只能按硬性条件判断；建议人工核对原文"
+        decision_hint = "watch"
     elif score >= VERDICT_GO:
         verdict = "建议投"
         reason = "综合匹配度高，可直接进入定制改写"
@@ -244,7 +317,7 @@ def evaluate(jd: dict, base: dict | None, profile: dict, weights: dict | None = 
 
     gaps = []
     for r in reqs:
-        if r["hit"] == 2 or not r.get("terms"):
+        if r["hit"] == 2 or r["hit"] is None or not r.get("terms"):
             continue
         state = "未覆盖" if r["hit"] == 0 else "部分覆盖"
         gap_text = (

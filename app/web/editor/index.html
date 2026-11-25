@@ -2731,7 +2731,7 @@ async function archiveCompanyPdf(pdf){
   const pdfB64 = await blobToBase64(blob);
   const r = await fetch('/api/companies/' + COMPANY_ID + '/pdf', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ pdf: pdfB64 })
+    body: JSON.stringify({ pdf: pdfB64, filename: resumeFileName() })
   });
   const j = await r.json().catch(()=>({}));
   if(!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status));
@@ -2823,10 +2823,10 @@ function exportImgPdf(){
       if(archiveErr){
         toast('PDF 已下载；未写入公司档案：' + archiveErr.message);
       }else if(archive && archive.skipped){
-        toast('PDF 已下载；公司文件夹已有 resume.pdf，未覆盖',
+        toast('PDF 已下载；公司文件夹已有 ' + (archive.filename || '同名 PDF') + '，未覆盖',
           { label:'打开文件夹', onClick: openCompanyFolder });
       }else if(archive){
-        toast('PDF 已下载，并归档到公司文件夹：resume.pdf',
+        toast('PDF 已下载，并归档到公司文件夹：' + (archive.filename || 'PDF'),
           { label:'打开文件夹', onClick: openCompanyFolder });
       }else{
         toast('已导出 PDF');
@@ -3236,12 +3236,14 @@ applyZoom();
     try{
       const html = exportHtmlSource();
       const r = await fetch('/api/companies/' + COMPANY_ID + '/export', {
-        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ html })
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ html, filename: resumeFileName() })
       });
       const j = await r.json().catch(()=>({}));
       if(r.ok && !j.error){
-        setSyncState('已写入 resume.html', 'ok');
-        toast('已保存到公司文件夹：resume.html',
+        const name = j.filename || '简历.html';
+        setSyncState('已写入 ' + name, 'ok');
+        toast('已保存到公司文件夹：' + name,
           { label:'打开文件夹', onClick: openCompanyFolder });
       }else{
         setSyncState('导出失败：' + (j.error || r.status), 'err');

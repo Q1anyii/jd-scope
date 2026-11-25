@@ -49,7 +49,7 @@ export const PRIO_LABEL = { high: "高", medium: "中", low: "低" };
 export const DIM_LABEL = {
   must: "必备要求覆盖", duty: "职责同构度", nice: "加分项覆盖", constraint: "硬性条件符合",
 };
-export const STATE_LABEL = { pass: "满足", partial: "勉强", unknown: "未知", fail: "不满足" };
+export const STATE_LABEL = { pass: "满足", partial: "部分", unknown: "未知", fail: "不满足" };
 export const SOURCE_LABEL = { default: "默认位置", custom: "自定义位置", env: "环境变量指定" };
 
 /* ---------------- 工具 ---------------- */

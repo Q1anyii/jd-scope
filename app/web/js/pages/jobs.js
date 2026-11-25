@@ -373,8 +373,8 @@ export const Jobs = {
             <div class="section-title">{{ g.label }}（{{ g.items.length }}）</div>
             <div class="req-row" v-for="r in g.items" :key="r.id">
               <div>
-                <span class="badge" :class="r.hit === 2 ? 'ok' : r.hit === 1 ? 'warn' : 'bad'">
-                  {{ r.hit === 2 ? '命中' : r.hit === 1 ? '部分' : '缺失' }}
+                <span class="badge" :class="r.hit === null ? 'plain' : r.hit === 2 ? 'ok' : r.hit === 1 ? 'warn' : 'bad'">
+                  {{ r.hit === null ? '待核对' : r.hit === 2 ? '命中' : r.hit === 1 ? '部分' : '缺失' }}
                 </span>
               </div>
               <div>

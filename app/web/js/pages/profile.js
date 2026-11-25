@@ -10,7 +10,7 @@ export const Profile = {
   setup() {
     const s = state;
     const form = reactive({
-      education: "", major: "", years: 0, cities: "", certs: "", notes: "",
+      education: "", major: "", years: 0, age: "", cities: "", certs: "", notes: "",
     });
     const saving = ref(false);
     const savedAt = computed(() => {
@@ -23,6 +23,7 @@ export const Profile = {
       form.education = p.education || "";
       form.major = p.major || "";
       form.years = p.years || 0;
+      form.age = p.age || "";
       form.cities = p.cities || "";
       form.certs = p.certs || "";
       form.notes = p.notes || "";
@@ -32,7 +33,7 @@ export const Profile = {
     const save = async () => {
       saving.value = true;
       try {
-        await api.saveProfile({ ...form, years: Number(form.years || 0) });
+        await api.saveProfile({ ...form, years: Number(form.years || 0), age: Number(form.age || 0) });
         await loadBoot();
         toast("档案已保存", "ok");
       } catch (err) { toast(err.message, "err"); }
@@ -45,7 +46,7 @@ export const Profile = {
   <div>
     <div class="view-head">
       <h1>个人档案</h1>
-      <p>只参与硬性条件判定：学历、年限、英语、意向城市。存在本机数据库里，不进代码库、不上传。</p>
+      <p>只参与硬性条件判定：学历、专业、年限、年龄、英语、意向城市。存在本机数据库里，不进代码库、不上传。</p>
     </div>
 
     <div class="panel">
@@ -60,6 +61,7 @@ export const Profile = {
           </label>
           <label class="field">专业<input v-model="form.major" placeholder="如 软件工程"></label>
           <label class="field">工作年限<input v-model="form.years" type="number" min="0" step="0.5"></label>
+          <label class="field">年龄<input v-model="form.age" type="number" min="0" max="100" placeholder="如 22"></label>
           <label class="field">意向城市<input v-model="form.cities" placeholder="逗号分隔，如 深圳,东莞"></label>
           <label class="field span2">证书<input v-model="form.certs" placeholder="如 CET-6、软考中级"></label>
           <label class="field span2">备注<textarea v-model="form.notes" rows="4" placeholder="可选，写给自己看的上下文"></textarea></label>

@@ -113,7 +113,7 @@ export const Companies = {
   <div>
     <div class="view-head">
       <h1>公司档案</h1>
-      <p>每个公司一个文件夹：<code>jd.txt</code> / <code>strategy.md</code> / <code>resume.json</code> / <code>resume.html</code> / <code>resume.pdf</code>，编辑器草稿也按公司隔离。改完直接在编辑器里导出，一条龙走完。</p>
+      <p>每个公司一个文件夹：成品简历用 <code>姓名-岗位名-简历.html / .pdf</code>；<code>jd / report / strategy</code> 用 <code>公司-岗位名-</code> 前缀；<code>resume.json</code> 是编辑器草稿。改完直接在编辑器里导出，一条龙走完。</p>
     </div>
 
     <div class="panel">

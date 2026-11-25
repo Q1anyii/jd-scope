@@ -181,6 +181,7 @@ a { color: var(--accent); }
 .form-grid.three { grid-template-columns: repeat(3, 1fr); }
 label.field { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--sub); }
 label.field.span2 { grid-column: span 2; }
+label.field.span3 { grid-column: span 3; }
 input[type="text"], input[type="password"], input[type="number"], input:not([type]), select, textarea {
   width: 100%; min-height: 36px; padding: 7px 10px;
   border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
@@ -372,6 +373,14 @@ pre.raw {
 .modal-head h3 { margin: 0; font-size: 16px; }
 .modal-head p { margin: 6px 0 0; color: var(--sub); font-size: 12.5px; }
 .modal-body { padding: 10px 20px 4px; }
+.modal-body.scroll { max-height: 70vh; overflow-y: auto; }
+.modal.wide { width: min(860px, 94vw); }
+.modal .form-grid { padding: 0; }
+.base-content {
+  width: 100%; min-height: 300px; max-height: 48vh; overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px; line-height: 1.6; white-space: pre;
+}
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px 18px; }
 
 .check { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: var(--sub); margin-top: 10px; }

@@ -3,13 +3,14 @@
 目录形态（位于当前数据目录下，随数据目录迁移一起搬走）：
 
     resumes/
-      示例科技-1/
-        jd.txt          JD 原文
-        strategy.md     这家公司的策略（岗位判断 / 缺口 / 改写与投递动作）
-        resume.json     编辑器完整状态（事实源，可再次打开继续改）
-        resume.html     导出的成品简历快照
-        report.md       入库时自动生成的分析摘要
-        base.html       从 HTML 基底复制来的原文，供编辑器首次导入
+      示例科技/
+        示例科技-前端工程师-jd.txt          JD 原文
+        示例科技-前端工程师-strategy.md      这家公司的策略
+        resume.json                          编辑器完整状态（事实源）
+        张三-前端工程师-简历.html             导出的成品简历
+        张三-前端工程师-简历.pdf              打印导出的 PDF
+        示例科技-前端工程师-report.md        建档时自动生成的分析摘要
+        base.html                            从 HTML 基底复制来的原文
 
 数据库里只存文件夹名（不含绝对路径），所以换机器、换数据目录都能直接用。
 """
@@ -63,6 +64,118 @@ def _read(path: Path, limit: int = 0) -> str:
         return ""
     text = path.read_text(encoding="utf-8", errors="ignore")
     return text[:limit] if limit else text
+
+
+FILE_PART_MAX = 60
+SUPPORT_LEGACY = {"jd": "jd.txt", "strategy": "strategy.md", "report": "report.md"}
+
+
+def _safe_part(name: str, fallback: str = "", limit: int = FILE_PART_MAX) -> str:
+    stem = ILLEGAL.sub("-", (name or "").strip()).strip(" .-")
+    stem = re.sub(r"-{2,}", "-", stem)
+    return (stem[:limit].strip(" .-") or fallback)
+
+
+def _prefix(company: str, title: str) -> str:
+    """公司岗位名前缀：jd / report / strategy 等支撑文件共用。"""
+    return "-".join(x for x in (_safe_part(company, "未命名公司", 48),
+                                _safe_part(title, "", 40)) if x)
+
+
+def _resume_stem(name: str, title: str) -> str:
+    """成品简历名：姓名-岗位名-简历。没填姓名时退回岗位名-简历。"""
+    clean_name = _safe_part(name, "", 30)
+    if clean_name in ("", "你的姓名"):
+        clean_name = ""
+    clean_title = _safe_part(title, "", 40)
+    if clean_name and clean_title:
+        return f"{clean_name}-{clean_title}-简历"
+    if clean_name:
+        return f"{clean_name}-简历"
+    if clean_title:
+        return f"{clean_title}-简历"
+    return "简历"
+
+
+def _html_name(text: str) -> str:
+    m = re.search(r"<h1[^>]*>(.*?)</h1>", text or "", re.I | re.S)
+    if not m:
+        return ""
+    name = re.sub(r"<[^>]+>", "", m.group(1))
+    return re.sub(r"\s+", " ", name).strip()
+
+
+def _resume_name(root: Path) -> str:
+    text = _read(root / "resume.json")
+    if text.strip():
+        try:
+            state = json.loads(text)
+            name = str(((state.get("meta") or {}).get("name")) or "").strip()
+            if name:
+                return name
+        except (ValueError, TypeError):
+            pass
+    html = _find_resume(root, ".html")
+    return _html_name(_read(html)) if html else _html_name(_read(root / "base.html"))
+
+
+def _resume_stem_for(conn, row, root: Path, html: str = "") -> str:
+    job = conn.execute("SELECT title FROM jobs WHERE id=?", (row["job_id"] or -1,)).fetchone()
+    title = job["title"] if job else ""
+    name = _html_name(html) if html else ""
+    return _resume_stem(name or _resume_name(root), title)
+
+
+def _support_path(root: Path, prefix: str, kind: str) -> Path:
+    suffix = {"jd": "jd.txt", "strategy": "strategy.md", "report": "report.md"}[kind]
+    return root / f"{prefix}-{suffix}"
+
+
+def _find_support(root: Path, kind: str) -> Path | None:
+    legacy = root / SUPPORT_LEGACY[kind]
+    if legacy.exists():
+        return legacy
+    suffix = SUPPORT_LEGACY[kind]
+    matches = sorted(root.glob(f"*-{suffix}"))
+    return matches[0] if matches else None
+
+
+def _find_resume(root: Path, ext: str) -> Path | None:
+    legacy = root / f"resume{ext}"
+    if legacy.exists():
+        return legacy
+    matches = sorted(root.glob(f"*-简历{ext}"))
+    return matches[0] if matches else None
+
+
+def _ensure_names(conn, row, root: Path) -> None:
+    """把旧命名就地迁到新口径；只改名，不覆盖任何已有成品。"""
+    if not root.exists() or (row["kind"] or "company") == "general":
+        return
+    job = conn.execute("SELECT title FROM jobs WHERE id=?", (row["job_id"] or -1,)).fetchone()
+    title = job["title"] if job else ""
+    prefix = _prefix(row["name"], title)
+    stem = _resume_stem_for(conn, row, root)
+
+    for kind in ("jd", "strategy", "report"):
+        src = root / SUPPORT_LEGACY[kind]
+        dst = _support_path(root, prefix, kind)
+        if src.exists() and not dst.exists():
+            src.rename(dst)
+
+    for ext in (".html", ".pdf"):
+        src = root / f"resume{ext}"
+        dst = root / f"{stem}{ext}"
+        if src.exists() and not dst.exists():
+            src.rename(dst)
+
+    if not _find_resume(root, ".pdf"):
+        loose = sorted(root.glob("*.pdf"))
+        title_key = re.sub(r"[\s\-_（）()]+", "", title)
+        if len(loose) == 1 and re.sub(r"[\s\-_（）()]+", "", loose[0].stem) == title_key:
+            dst = root / f"{stem}.pdf"
+            if not dst.exists():
+                loose[0].rename(dst)
 
 
 def _strategy_skeleton(conn, name: str, job, base_label: str) -> str:
@@ -191,10 +304,11 @@ def create(conn, name: str, job_id: int | None = None, base_id: int | None = Non
         # HTML 基底：原样放进来，编辑器首次打开时用 parseResumeHtml 导入
         _write(root / "base.html", base["content"] or "")
 
+    prefix = _prefix(name, job["title"] if job else "")
     if job:
-        _write(root / "jd.txt", job["jd_raw"] or "")
-    _write(root / "strategy.md", _strategy_skeleton(conn, name, job, base_label))
-    _write(root / "report.md", _report(conn, name, job, base_label))
+        _write(root / f"{prefix}-jd.txt", job["jd_raw"] or "")
+    _write(root / f"{prefix}-strategy.md", _strategy_skeleton(conn, name, job, base_label))
+    _write(root / f"{prefix}-report.md", _report(conn, name, job, base_label))
 
     cur = conn.execute(
         "INSERT INTO companies(name, folder, job_id, base_id, status, kind, note, created_at, updated_at)"
@@ -221,14 +335,15 @@ def detail(conn, cid: int) -> dict:
         return {}
     item = dict(row)
     root = folder_of(item)
+    _ensure_names(conn, row, root)
     job = conn.execute("SELECT * FROM jobs WHERE id=?", (item["job_id"] or -1,)).fetchone()
     reviews = {
-        "jd": (root / "jd.txt").exists(),
+        "jd": _find_support(root, "jd") is not None,
         "resume": (root / "resume.json").exists(),
-        "html": (root / "resume.html").exists(),
-        "pdf": (root / "resume.pdf").exists(),
-        "strategy": (root / "strategy.md").exists(),
-        "report": (root / "report.md").exists(),
+        "html": _find_resume(root, ".html") is not None,
+        "pdf": _find_resume(root, ".pdf") is not None,
+        "strategy": _find_support(root, "strategy") is not None,
+        "report": _find_support(root, "report") is not None,
         "base": (root / "base.html").exists(),
     }
     item.update(
@@ -340,47 +455,64 @@ def save_resume(conn, cid: int, state: dict) -> dict:
 
 
 def read_strategy(conn, cid: int) -> str:
-    row = conn.execute("SELECT folder FROM companies WHERE id=?", (cid,)).fetchone()
-    return _read(folder_of(row) / "strategy.md") if row else ""
+    row = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    if not row:
+        return ""
+    path = _find_support(folder_of(row), "strategy")
+    return _read(path) if path else ""
 
 
 def save_strategy(conn, cid: int, text: str) -> dict:
     row = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
     if row is None:
         return {"error": "公司档案不存在"}
-    _write(folder_of(row) / "strategy.md", text)
+    root = folder_of(row)
+    path = _find_support(root, "strategy")
+    if path is None:
+        job = conn.execute("SELECT title FROM jobs WHERE id=?", (row["job_id"] or -1,)).fetchone()
+        path = _support_path(root, _prefix(row["name"], job["title"] if job else ""), "strategy")
+    _write(path, text)
     conn.execute("UPDATE companies SET updated_at=? WHERE id=?", (db.now(), cid))
     conn.commit()
-    return {"ok": True}
+    return {"ok": True, "filename": path.name}
 
 
-def save_export(conn, cid: int, html: str) -> dict:
+def _clean_filename(filename: str) -> str:
+    return re.sub(r"\.(?:html|htm|pdf)$", "", (filename or "").strip(), flags=re.I)
+
+
+def save_export(conn, cid: int, html: str, filename: str = "") -> dict:
     row = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
     if row is None:
         return {"error": "公司档案不存在"}
-    _write(folder_of(row) / "resume.html", html)
+    root = folder_of(row)
+    stem = _safe_part(_clean_filename(filename), "", 80) or _resume_stem_for(conn, row, root, html)
+    target = root / f"{stem}.html"
+    _write(target, html)
     conn.execute(
         "UPDATE companies SET status='exported', updated_at=? WHERE id=?", (db.now(), cid)
     )
     conn.commit()
-    return {"ok": True, "bytes": len(html.encode("utf-8"))}
+    return {"ok": True, "filename": target.name, "bytes": len(html.encode("utf-8"))}
 
 
-def save_pdf(conn, cid: int, data: bytes) -> dict:
-    """把编辑器导出的 PDF 归档到公司文件夹；已有 resume.pdf 时按用户口径跳过，不覆盖。"""
+def save_pdf(conn, cid: int, data: bytes, filename: str = "") -> dict:
+    """把编辑器导出的 PDF 归档到公司文件夹；已有同名 PDF 时按用户口径跳过，不覆盖。"""
     row = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
     if row is None:
         return {"error": "公司档案不存在"}
-    target = folder_of(row) / "resume.pdf"
+    root = folder_of(row)
+    stem = _safe_part(_clean_filename(filename), "", 80) or _resume_stem_for(conn, row, root)
+    target = root / f"{stem}.pdf"
     if target.exists():
-        return {"ok": True, "skipped": True, "bytes": target.stat().st_size}
+        return {"ok": True, "skipped": True, "bytes": target.stat().st_size, "filename": target.name}
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
     conn.execute(
         "UPDATE companies SET status='exported', updated_at=? WHERE id=?", (db.now(), cid)
     )
     conn.commit()
-    return {"ok": True, "skipped": False, "bytes": len(data)}
+    return {"ok": True, "skipped": False, "bytes": len(data), "filename": target.name}
 
 
 def base_html(conn, cid: int) -> str:
@@ -389,8 +521,11 @@ def base_html(conn, cid: int) -> str:
 
 
 def jd_text(conn, cid: int) -> str:
-    row = conn.execute("SELECT folder FROM companies WHERE id=?", (cid,)).fetchone()
-    return _read(folder_of(row) / "jd.txt") if row else ""
+    row = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    if not row:
+        return ""
+    path = _find_support(folder_of(row), "jd")
+    return _read(path) if path else ""
 
 
 def open_folder(conn, cid: int) -> dict:

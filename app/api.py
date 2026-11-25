@@ -161,17 +161,78 @@ class Api:
         finally:
             conn.close()
 
+    @route("GET", r"/api/bases/\d+")
+    def get_base(self, m, body, q):
+        bid = int(m.group(0).split("/")[-1])
+        conn = self._conn()
+        try:
+            row = conn.execute("SELECT * FROM bases WHERE id=?", (bid,)).fetchone()
+            if row is None:
+                return {"error": "基底不存在"}
+            item = dict(row)
+            item["keywords"] = json.loads(item.get("keywords") or "[]")
+            item["tags"] = json.loads(item.get("tags") or "[]")
+            return {"item": item}
+        finally:
+            conn.close()
+
     @route("PATCH", r"/api/bases/\d+")
     def patch_base(self, m, body, q):
         bid = int(m.group(0).split("/")[-1])
         conn = self._conn()
         try:
+            row = conn.execute("SELECT * FROM bases WHERE id=?", (bid,)).fetchone()
+            if row is None:
+                return {"error": "基底不存在"}
+
+            updates: list[tuple[str, object]] = []
+            if "code" in body:
+                code = str(body.get("code") or "").strip()
+                if not code:
+                    return {"error": "基底代号不能为空"}
+                updates.append(("code", code))
             if "intent" in body:
-                conn.execute("UPDATE bases SET intent=? WHERE id=?", (body["intent"], bid))
+                intent = str(body.get("intent") or "").strip()
+                if not intent:
+                    return {"error": "求职意向不能为空"}
+                updates.append(("intent", intent))
+            if "label" in body:
+                updates.append(("label", str(body.get("label") or "").strip()))
+            if "tags" in body:
+                tags = body.get("tags") or []
+                if isinstance(tags, str):
+                    tags = [t.strip() for t in re.split(r"[,，、\s]+", tags) if t.strip()]
+                elif not isinstance(tags, list):
+                    tags = []
+                updates.append(("tags", json.dumps([str(t) for t in tags], ensure_ascii=False)))
+            if "content" in body:
+                content = str(body.get("content") or "")
+                if len(content.strip()) < 20:
+                    return {"error": "基底正文不能为空"}
+                terms = sorted(set(find_terms(content)))
+                updates += [
+                    ("content", content),
+                    ("keywords", json.dumps(terms, ensure_ascii=False)),
+                    ("kind", companies.detect_kind(content)),
+                    ("coverage", len(terms)),
+                ]
             if "active" in body:
-                conn.execute("UPDATE bases SET active=? WHERE id=?", (1 if body["active"] else 0, bid))
-            conn.commit()
-            return {"ok": True}
+                updates.append(("active", 1 if body["active"] else 0))
+
+            if not updates:
+                return {"ok": True, "item": dict(row)}
+            try:
+                conn.execute(
+                    "UPDATE bases SET " + ", ".join(f"{k}=?" for k, _ in updates) + " WHERE id=?",
+                    [v for _, v in updates] + [bid],
+                )
+                conn.commit()
+            except Exception as e:  # noqa: BLE001
+                return {"error": f"代号已存在或写入失败：{e}"}
+            item = dict(conn.execute("SELECT * FROM bases WHERE id=?", (bid,)).fetchone())
+            item["keywords"] = json.loads(item.get("keywords") or "[]")
+            item["tags"] = json.loads(item.get("tags") or "[]")
+            return {"ok": True, "item": item}
         finally:
             conn.close()
 
@@ -739,7 +800,7 @@ class Api:
             return {"error": "导出的 HTML 内容为空"}
         conn = self._conn()
         try:
-            return companies.save_export(conn, cid, html)
+            return companies.save_export(conn, cid, html, body.get("filename") or "")
         finally:
             conn.close()
 
@@ -762,7 +823,7 @@ class Api:
             return {"error": "PDF 超过 32MB，未归档"}
         conn = self._conn()
         try:
-            return companies.save_pdf(conn, cid, data)
+            return companies.save_pdf(conn, cid, data, body.get("filename") or "")
         finally:
             conn.close()
 

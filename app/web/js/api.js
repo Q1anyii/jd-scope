@@ -32,7 +32,9 @@ export const api = {
   saveProfile: (profile) => request("/api/profile", { method: "POST", body: profile }),
 
   listBases: () => request("/api/bases"),
+  getBase: (id) => request(`/api/bases/${id}`),
   createBase: (payload) => request("/api/bases", { method: "POST", body: payload }),
+  updateBase: (id, payload) => request(`/api/bases/${id}`, { method: "PATCH", body: payload }),
   deleteBase: (id) => request(`/api/bases/${id}`, { method: "DELETE" }),
 
   parseJd: (payload) => request("/api/jobs/parse", { method: "POST", body: payload }),

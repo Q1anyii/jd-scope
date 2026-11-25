@@ -58,7 +58,8 @@ class TestJdParse(unittest.TestCase):
         counts = {r["category"]: 0 for r in self.p["requirements"]}
         for r in self.p["requirements"]:
             counts[r["category"]] += 1
-        self.assertEqual(counts, {"must": 5, "duty": 4, "nice": 3})
+        # 第一条「本科及以上学历，计算机相关专业，2年以上开发经验」已归入硬条件，不再算技术条目
+        self.assertEqual(counts, {"must": 4, "duty": 4, "nice": 3})
 
     def test_constraints(self):
         kinds = {c["kind"] for c in self.p["constraints"]}
@@ -66,6 +67,35 @@ class TestJdParse(unittest.TestCase):
         self.assertIn("years", kinds)
         years = next(c for c in self.p["constraints"] if c["kind"] == "years")
         self.assertEqual(years["level"], 2)
+
+    def test_degree_ignores_age_line_and_takes_minimum(self):
+        jd = """职位要求：
+1、学历：本科及以上学历
+2、专业：计算机类、电子信息类、自动化类、数学类、统计学类及信息管理与信息系统等相关专业
+3、年龄：本科毕业生28周岁（含）以下，硕士研究生32周岁（含）以下，博士研究生35周岁（含）以下"""
+        parsed = jdparse.parse_jd(jd)
+        degree = next(c for c in parsed["constraints"] if c["kind"] == "degree")
+        self.assertEqual(degree["level"], 3)
+        self.assertIn("本科", degree["text"])
+        # 专业 / 年龄 / 学历行不该再变成「无可比对术语」的必备要求
+        self.assertEqual(parsed["requirements"], [])
+        major = next(c for c in parsed["constraints"] if c["kind"] == "major")
+        self.assertIn("计算机", major["text"])
+        age = next(c for c in parsed["constraints"] if c["kind"] == "age")
+        self.assertEqual([r["max"] for r in age["rules"]], [28, 32, 35])
+        res = analyze.evaluate(parsed, None, {"education": "本科"})
+        self.assertEqual(res["verdict"], "待核对")
+
+    def test_no_term_requirement_is_not_counted_as_missing(self):
+        jd = """岗位职责：
+1、负责与产品经理对齐目标。
+任职要求：
+1、熟悉 Python。"""
+        parsed = jdparse.parse_jd(jd)
+        res = analyze.evaluate(parsed, None, {"education": "本科"})
+        vague = next(r for r in res["requirements"] if "对齐目标" in r["text"])
+        self.assertIsNone(vague["hit"])
+        self.assertNotIn(vague["text"], [g["requirement"] for g in res["gaps"]])
 
     def test_terms_not_empty(self):
         for t in ("Python", "FastAPI", "LangGraph", "RAG"):
@@ -318,6 +348,33 @@ class TestReanalyzeKeepsGapProgress(HttpCase):
         md = self.call(f"/api/jobs/{job['job_id']}/export", "POST", {})
         self.assertIn("岗位匹配报告", md["markdown"])
         self.assertTrue(Path(md["path"]).exists())
+
+
+class TestBaseEdit(HttpCase):
+    def test_get_and_patch_base_content(self):
+        created = self.call("/api/bases", "POST", {
+            "code": "edit-me", "intent": "前端工程师", "label": "旧备注", "tags": "a,b",
+            "content": "熟悉 Vue 3 与 TypeScript 的前端开发。",
+        })
+        self.assertTrue(created["ok"])
+        conn = db.connect()
+        try:
+            bid = conn.execute("SELECT id FROM bases WHERE code='edit-me'").fetchone()["id"]
+        finally:
+            conn.close()
+        item = self.call(f"/api/bases/{bid}")["item"]
+        self.assertIn("Vue", item["content"])
+        updated = self.call(f"/api/bases/{bid}", "PATCH", {
+            "code": "edit-me-2", "intent": "前端开发工程师", "label": "新备注",
+            "tags": "x,y", "content": "熟悉 Vue 3、TypeScript、Docker 与 MySQL。",
+        })
+        self.assertTrue(updated["ok"], updated)
+        self.assertEqual(updated["item"]["code"], "edit-me-2")
+        self.assertEqual(updated["item"]["intent"], "前端开发工程师")
+        self.assertEqual(updated["item"]["tags"], ["x", "y"])
+        self.assertIn("Docker", updated["item"]["keywords"])
+        self.assertGreaterEqual(updated["item"]["coverage"], 4)
+        self.call(f"/api/bases/{bid}", "DELETE")
 
 
 if __name__ == "__main__":

@@ -33,6 +33,9 @@ TITLE_RE = re.compile(r"([\u4e00-\u9fa5A-Za-z0-9（）()/\-\s]{2,26}(?:工程师
 YEARS_RE = re.compile(r"(\d{1,2})\s*年(?:及)?以上[^\n，。；]{0,8}?经验")
 YEARS_RE2 = re.compile(r"(\d{1,2})\s*年(?:以上|及以上)?[^\n，。；]{0,4}?经验")
 EN_RE = re.compile(r"(CET-?\s?[46]|四级|六级|雅思|托福|英语[^\n，。]{0,8})")
+AGE_RE = re.compile(r"(\d{2})\s*(?:周岁|岁)")
+AGE_RANGE_RE = re.compile(r"(\d{2})\s*[-~至]\s*(\d{2})\s*(?:周岁|岁)")
+YEAR_TEXT_RE = re.compile(r"\d{1,2}\s*年(?:及)?以上[^\n，。；]{0,8}?经验")
 
 META_TITLE_KEYS = ("岗位名称", "职位名称", "招聘岗位", "岗位")
 META_CITY_KEYS = ("工作地点", "办公地点", "工作城市", "城市", "地点")
@@ -158,26 +161,159 @@ def _detect_city(raw: str) -> str:
     return ""
 
 
+def _clauses(line: str) -> list[str]:
+    """按中文标点切小句；顿号不切，避免把「计算机类、电子信息类」拆散。"""
+    return [x.strip() for x in re.split(r"[，,；;。]", line) if x.strip()]
+
+
+def _degree_words(text: str) -> list[tuple[str, int]]:
+    """取一句里的学历词。先把「博士研究生 / 硕士研究生」收敛成学位名，避免重复计级。"""
+    text = text.replace("博士研究生", "博士").replace("硕士研究生", "硕士")
+    return [(word, level) for word, level in DEGREES if word in text]
+
+
+def _is_qualification(text: str) -> bool:
+    """学历 / 专业 / 年龄 / 证书这类资格行，不该当成技术能力条目参与术语覆盖。"""
+    if find_terms(text):
+        return False
+    s = (text or "").strip()
+    if not s:
+        return False
+    if "不限学历" in s or "学历不限" in s:
+        return True
+    if s.startswith(("学历", "学位", "专业", "年龄", "毕业", "院校", "证书", "资格", "户籍", "性别", "身高")):
+        return True
+    if "学历" in s and _degree_words(s):
+        return True
+    if "专业" in s and ("相关专业" in s or "专业要求" in s or s.endswith("专业")):
+        return True
+    if AGE_RE.search(s) and any(k in s for k in ("年龄", "周岁", "以下", "以内")):
+        return True
+    if any(k in s for k in ("CET-4", "CET-6", "CET4", "CET6", "四级", "六级")) and (
+        "以上" in s or "及以上" in s
+    ):
+        return True
+    if YEAR_TEXT_RE.search(s) and len(s) < 60:
+        return True
+    return False
+
+
+def _extract_degree(raw: str) -> dict | None:
+    if "不限学历" in raw or "学历不限" in raw:
+        return {"kind": "degree", "level": 0, "text": "学历不限"}
+
+    candidates: list[tuple[str, int]] = []
+    for line in raw.splitlines():
+        for clause in _clauses(_clean(line)):
+            # 「硕士优先」「博士加分」是偏好，不是硬门槛；年龄行里的学历词也不是学历要求
+            if "优先" in clause or "加分" in clause:
+                continue
+            if AGE_RE.search(clause) and "学历" not in clause:
+                continue
+            words = _degree_words(clause)
+            if not words:
+                continue
+            context = (
+                "学历" in clause
+                or "学位" in clause
+                or "毕业" in clause
+                or "统招" in clause
+                or "全日制" in clause
+                or any(f"{word}及以上" in clause or f"{word}以上" in clause for word, _ in words)
+                or clause.startswith(tuple(word for word, _ in words))
+            )
+            if not context:
+                continue
+            candidates.append(min(words, key=lambda item: item[1]))
+
+    if not candidates:
+        return None
+    # 「本科及以上」按最低可接受学历算，不能因为同一段还写了「硕士优先」就抬成硕士
+    word, level = min(candidates, key=lambda item: item[1])
+    return {"kind": "degree", "level": level, "text": f"{word}及以上"}
+
+
+def _extract_years(raw: str) -> dict | None:
+    values = []
+    for line in raw.splitlines():
+        for clause in _clauses(_clean(line)):
+            if "优先" in clause or "加分" in clause:
+                continue
+            for pattern in (YEARS_RE, YEARS_RE2):
+                m = pattern.search(clause)
+                if m:
+                    values.append(int(m.group(1)))
+                    break
+    if not values:
+        return None
+    level = min(values)
+    return {"kind": "years", "level": level, "text": f"{level} 年以上经验"}
+
+
+def _extract_major(raw: str) -> dict | None:
+    for line in raw.splitlines():
+        for clause in _clauses(_clean(line)):
+            if "专业" not in clause or find_terms(clause):
+                continue
+            if "不限" in clause:
+                return {"kind": "major", "text": "专业不限", "unlimited": True}
+            if (
+                clause.startswith("专业")
+                or clause.endswith("专业")
+                or "专业要求" in clause
+                or "相关专业" in clause
+            ):
+                return {"kind": "major", "text": clause[:100]}
+    return None
+
+
+def _extract_age(raw: str) -> dict | None:
+    rules: list[dict] = []
+    seen: set[tuple[str, int]] = set()
+    for line in raw.splitlines():
+        if not any(k in line for k in ("年龄", "周岁", "岁")):
+            continue
+        for clause in _clauses(_clean(line)):
+            if "优先" in clause:
+                continue
+            m = AGE_RANGE_RE.search(clause)
+            if m:
+                max_age = int(m.group(2))
+            else:
+                m = AGE_RE.search(clause)
+                if not m:
+                    continue
+                max_age = int(m.group(1))
+            degree = ""
+            for word, _ in DEGREES:
+                if word in clause:
+                    degree = word
+                    break
+            key = (degree, max_age)
+            if key in seen:
+                continue
+            seen.add(key)
+            rules.append({"degree": degree, "max": max_age, "text": clause[:50]})
+    if not rules:
+        return None
+    text = "年龄要求：" + "；".join(r["text"] for r in rules)
+    return {"kind": "age", "rules": rules, "text": text[:120]}
+
+
 def extract_constraints(raw: str) -> list[dict]:
     out: list[dict] = []
-    # 学历
-    if "不限学历" in raw or "学历不限" in raw:
-        out.append({"kind": "degree", "level": 0, "text": "学历不限"})
-    else:
-        best = None
-        for word, level in DEGREES:
-            if word in raw:
-                if best is None or level > best[1]:
-                    best = (word, level)
-        if best:
-            out.append({"kind": "degree", "level": best[1], "text": f"{best[0]}及以上"})
-    # 年限
-    for pattern in (YEARS_RE, YEARS_RE2):
-        m = pattern.search(raw)
-        if m:
-            out.append({"kind": "years", "level": int(m.group(1)), "text": m.group(0)})
-            break
-    # 英语
+    degree = _extract_degree(raw)
+    if degree:
+        out.append(degree)
+    years = _extract_years(raw)
+    if years:
+        out.append(years)
+    major = _extract_major(raw)
+    if major:
+        out.append(major)
+    age = _extract_age(raw)
+    if age:
+        out.append(age)
     m = EN_RE.search(raw)
     if m:
         out.append({"kind": "english", "text": m.group(0).strip()})
@@ -212,6 +348,8 @@ def normalize_ai_items(items: list) -> list[dict]:
             continue
         text = str(raw.get("text") or "").strip()
         if len(text) < 3:
+            continue
+        if _is_qualification(text):
             continue
         category = str(raw.get("category") or "").strip()
         if category not in WEIGHT:
@@ -263,6 +401,8 @@ def parse_jd(raw: str, company: str = "", title: str = "", city: str = "") -> di
     for category in ("must", "duty", "nice"):
         for text in sections[category]:
             if len(text) < 3:
+                continue
+            if _is_qualification(text):
                 continue
             priority = PRIORITY[category]
             if category == "must" and any(w in text for w in HARD_WORDS):

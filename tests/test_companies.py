@@ -101,12 +101,13 @@ class TestCompanyFiles(CompanyBase):
         item = companies.create(self.conn, "示例科技", self.job_id, 1)
         root = Path(self._tmp) / "config" / "resumes" / item["folder"]
         self.assertTrue(root.is_dir())
-        for name in ("jd.txt", "strategy.md", "report.md", "base.html"):
+        prefix = "示例科技-前端工程师"
+        for name in (f"{prefix}-jd.txt", f"{prefix}-strategy.md", f"{prefix}-report.md", "base.html"):
             self.assertTrue((root / name).exists(), name)
-        strategy = (root / "strategy.md").read_text(encoding="utf-8")
+        strategy = (root / f"{prefix}-strategy.md").read_text(encoding="utf-8")
         self.assertIn("示例科技", strategy)
         self.assertIn("建议投", strategy)
-        self.assertIn("基本盘够", (root / "report.md").read_text(encoding="utf-8"))
+        self.assertIn("基本盘够", (root / f"{prefix}-report.md").read_text(encoding="utf-8"))
         self.assertFalse((root / "resume.json").exists())
 
     def test_same_name_never_overwrites(self):
@@ -145,12 +146,14 @@ class TestCompanyFiles(CompanyBase):
         self.assertTrue(first["ok"])
         self.assertFalse(first["skipped"])
         root = Path(self._tmp) / "config" / "resumes" / companies.detail(self.conn, cid)["folder"]
-        self.assertTrue((root / "resume.pdf").exists())
+        target = root / first["filename"]
+        self.assertTrue(target.exists())
+        self.assertIn("-简历.pdf", target.name)
         self.assertTrue(companies.detail(self.conn, cid)["files"]["pdf"])
 
         second = companies.save_pdf(self.conn, cid, b"%PDF-1.4\n" + b"y" * 300)
         self.assertTrue(second["skipped"])
-        self.assertEqual((root / "resume.pdf").read_bytes(), b"%PDF-1.4\n" + b"x" * 300)
+        self.assertEqual(target.read_bytes(), b"%PDF-1.4\n" + b"x" * 300)
 
     def test_delete_record_keeps_folder(self):
         cid = companies.create(self.conn, "保留公司", self.job_id, None)["id"]
@@ -159,6 +162,30 @@ class TestCompanyFiles(CompanyBase):
         self.assertTrue(out["kept"])
         self.assertTrue((Path(self._tmp) / "config" / "resumes" / folder).exists())
         self.assertEqual(companies.detail(self.conn, cid), {})
+
+    def test_detail_migrates_legacy_filenames(self):
+        cid = companies.create(self.conn, "迁移公司", self.job_id, None)["id"]
+        folder = companies.detail(self.conn, cid)["folder"]
+        root = Path(self._tmp) / "config" / "resumes" / folder
+        # 模拟旧版公司文件夹：先删掉新版支撑文件，再放固定文件名 + 岗位名当 PDF 名
+        for name in ("迁移公司-前端工程师-jd.txt", "迁移公司-前端工程师-strategy.md", "迁移公司-前端工程师-report.md"):
+            (root / name).unlink(missing_ok=True)
+        (root / "jd.txt").write_text("旧 JD", encoding="utf-8")
+        (root / "strategy.md").write_text("旧策略", encoding="utf-8")
+        (root / "report.md").write_text("旧报告", encoding="utf-8")
+        (root / "resume.html").write_text("<html><body><h1>张三</h1></body></html>", encoding="utf-8")
+        (root / "前端工程师.pdf").write_bytes(b"%PDF-1.4\n" + b"x" * 50)
+        detail = companies.detail(self.conn, cid)
+        self.assertTrue((root / "迁移公司-前端工程师-jd.txt").exists())
+        self.assertTrue((root / "张三-前端工程师-简历.html").exists())
+        self.assertTrue((root / "张三-前端工程师-简历.pdf").exists())
+        self.assertTrue(detail["files"]["jd"])
+        self.assertTrue(detail["files"]["html"])
+        self.assertTrue(detail["files"]["pdf"])
+
+        # 没有 resume.json 时，导出兜底也要能从已迁移的成品 HTML 读到姓名
+        out = companies.save_export(self.conn, cid, "<html><body>hi</body></html>")
+        self.assertEqual(out["filename"], "张三-前端工程师-简历.html")
 
 
 class TestApiCompanies(CompanyBase):
@@ -265,8 +292,9 @@ class TestSchemaMigration(unittest.TestCase):
             self.assertIn("companies", {r["name"] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'")})
             version = conn.execute("SELECT v FROM meta WHERE k='schema_version'").fetchone()["v"]
-            self.assertEqual(version, "3")
+            self.assertEqual(version, "4")
             self.assertIn("kind", db._columns(conn, "companies"))
+            self.assertIn("age", db._columns(conn, "profile"))
             row = conn.execute("SELECT kind FROM bases WHERE code='old'").fetchone()
             self.assertEqual(row["kind"], "html")
             row = conn.execute("SELECT source FROM requirements WHERE job_id=1").fetchone()
