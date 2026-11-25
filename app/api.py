@@ -420,6 +420,13 @@ class Api:
             status = (q.get("status") or [""])[0]
             kw = (q.get("q") or [""])[0].strip()
             sort = (q.get("sort") or [""])[0]
+            date_from = (q.get("date_from") or [""])[0].strip()
+            date_to = (q.get("date_to") or [""])[0].strip()
+            for label, value in (("起始日期", date_from), ("结束日期", date_to)):
+                if value and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                    return {"error": f"{label}格式应为 YYYY-MM-DD"}
+            if date_from and date_to and date_from > date_to:
+                return {"error": "起始日期不能晚于结束日期"}
             sql = ("SELECT id,company,title,city,status,decision,base_id,score,verdict,"
                    "score_json,created_at FROM jobs")
             cond, args = [], []
@@ -430,6 +437,12 @@ class Api:
                 cond.append("(company LIKE ? OR title LIKE ?)")
                 args.append(f"%{kw}%")
                 args.append(f"%{kw}%")
+            if date_from:
+                cond.append("substr(created_at,1,10) >= ?")
+                args.append(date_from)
+            if date_to:
+                cond.append("substr(created_at,1,10) <= ?")
+                args.append(date_to)
             if cond:
                 sql += " WHERE " + " AND ".join(cond)
             # 排序白名单，避免把参数拼进 SQL

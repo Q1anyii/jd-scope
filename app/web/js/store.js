@@ -21,6 +21,8 @@ export const state = reactive({
   jobQuery: "",
   jobStatus: "",
   jobSort: "score",
+  jobFrom: "",
+  jobTo: "",
 
   detail: null,
   detailLoading: false,
@@ -35,6 +37,12 @@ export const state = reactive({
   companies: [],
   companiesLoading: false,
   companyDetail: null,
+  companyQuery: "",
+  companyKind: "",
+  companyVerdict: "",
+  companySort: "",
+  companyFrom: "",
+  companyTo: "",
   toasts: [],
 });
 
@@ -109,6 +117,8 @@ export async function loadJobs() {
       q: state.jobQuery.trim(),
       status: state.jobStatus,
       sort: state.jobSort,
+      date_from: state.jobFrom,
+      date_to: state.jobTo,
     });
     state.jobs = data.items || [];
   } finally {
@@ -163,6 +173,14 @@ export async function openJob(id) {
   } finally {
     state.detailLoading = false;
   }
+}
+
+/* 从公司档案跳到关联岗位：复用岗位页同一个详情抽屉，不重新打开窗口。 */
+export async function openJobFromCompany(id) {
+  state.view = "jobs";
+  await loadJobs();
+  await openJob(id);
+  history.replaceState(null, "", `/?view=jobs&job=${id}`);
 }
 
 export function closeDetail() {

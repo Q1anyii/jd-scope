@@ -22,7 +22,7 @@ export const Jobs = {
       clearTimeout(timer);
       timer = setTimeout(() => loadJobs().catch((e) => toast(e.message, "err")), 260);
     });
-    watch(() => [s.jobStatus, s.jobSort], () => loadJobs().catch((e) => toast(e.message, "err")));
+    watch(() => [s.jobStatus, s.jobSort, s.jobFrom, s.jobTo], () => loadJobs().catch((e) => toast(e.message, "err")));
 
     const missingOf = (job) => {
       const cov = (job.score_json && job.score_json.coverage) || {};
@@ -222,23 +222,27 @@ export const Jobs = {
     </div>
 
     <div class="panel">
-      <div class="pad-18">
-        <div class="row-gap">
-          <input class="grow" v-model="s.jobQuery" placeholder="搜公司 / 岗位">
-          <select v-model="s.jobStatus" style="width:140px">
-            <option value="">全部状态</option>
-            <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">{{ label }}</option>
-          </select>
-          <select v-model="s.jobSort" style="width:150px">
-            <option value="score">匹配度从高到低</option>
-            <option value="score_asc">匹配度从低到高</option>
-            <option value="newest">最近录入</option>
-            <option value="oldest">最早录入</option>
-          </select>
-          <button class="ghost" @click="reanalyzeAll" :disabled="busy.batch > 0 || !s.jobs.length">
-            {{ busy.batch > 0 ? '重算中 ' + busy.batch + ' 条' : '批量重算' }}
-          </button>
+      <div class="filter-bar">
+        <div class="search-field">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="6.2"/><path d="M15.2 15.2L20 20"/>
+          </svg>
+          <input v-model="s.jobQuery" placeholder="搜公司 / 岗位">
         </div>
+        <date-range v-model:from="s.jobFrom" v-model:to="s.jobTo" label="录入日期" />
+        <select v-model="s.jobStatus" class="filter-select" style="width:140px">
+          <option value="">全部状态</option>
+          <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">{{ label }}</option>
+        </select>
+        <select v-model="s.jobSort" class="filter-select" style="width:152px">
+          <option value="score">匹配度从高到低</option>
+          <option value="score_asc">匹配度从低到高</option>
+          <option value="newest">最近录入</option>
+          <option value="oldest">最早录入</option>
+        </select>
+        <button class="ghost filter-action" @click="reanalyzeAll" :disabled="busy.batch > 0 || !s.jobs.length">
+          {{ busy.batch > 0 ? '重算中 ' + busy.batch + ' 条' : '批量重算' }}
+        </button>
       </div>
 
       <div class="table-wrap">
@@ -259,14 +263,14 @@ export const Jobs = {
               </td>
               <td><span class="badge" :class="missingOf(job) ? 'bad' : 'ok'">{{ missingOf(job) }}</span></td>
               <td>{{ STATUS_LABEL[job.status] || job.status }}</td>
-              <td class="muted">{{ shortDate(job.created_at) }}</td>
+              <td class="muted nowrap">{{ shortDate(job.created_at) }}</td>
             </tr>
             <tr v-if="!s.jobs.length">
               <td colspan="7"><div class="empty">
                 <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
                   <rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9h10M7 13h6M7 17h4"/>
                 </svg>
-                {{ s.jobQuery || s.jobStatus ? '这个筛选条件下没有岗位' : '还没有岗位，先去「JD 入库」录一条' }}
+                {{ s.jobQuery || s.jobStatus || s.jobFrom || s.jobTo ? '这个筛选条件下没有岗位' : '还没有岗位，先去「JD 入库」录一条' }}
               </div></td>
             </tr>
           </tbody>

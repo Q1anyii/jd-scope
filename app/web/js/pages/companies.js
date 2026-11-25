@@ -1,9 +1,9 @@
 /* 公司档案：一家公司 = 一个本地文件夹，简历 / 策略 / JD / 报告都在一起。 */
 
 import { api } from "../api.js";
-import { state, toast, loadCompanies, openEditor, shortDate } from "../store.js";
+import { state, toast, loadCompanies, openJobFromCompany, openEditor, shortDate } from "../store.js";
 
-const { reactive, ref, onMounted } = window.Vue;
+const { reactive, ref, computed, onMounted } = window.Vue;
 
 export const Companies = {
   name: "companies",
@@ -13,6 +13,59 @@ export const Companies = {
     const bases = ref([]);
     const saving = ref(false);
     const strategy = reactive({ open: false, id: 0, name: "", text: "", saving: false });
+
+    const hasFilters = computed(() => !!(
+      state.companyQuery || state.companyKind || state.companyVerdict ||
+      state.companySort || state.companyFrom || state.companyTo
+    ));
+
+    const matchesVerdict = (verdict, key) => {
+      if (!key) return true;
+      const v = verdict || "";
+      if (key === "go") return v === "建议投";
+      if (key === "maybe") return v.startsWith("可投");
+      if (key === "review") return v === "待核对";
+      if (key === "no") return v === "不建议投";
+      return true;
+    };
+
+    const filteredCompanies = computed(() => {
+      const q = (state.companyQuery || "").trim().toLowerCase();
+      let rows = (state.companies || []).filter((c) => {
+        if (state.companyKind === "general" && c.kind !== "general") return false;
+        if (state.companyKind === "company" && c.kind === "general") return false;
+        if (!matchesVerdict(c.verdict, state.companyVerdict)) return false;
+        const day = (c.updated_at || c.created_at || "").slice(0, 10);
+        if (state.companyFrom && day < state.companyFrom) return false;
+        if (state.companyTo && day > state.companyTo) return false;
+        if (!q) return true;
+        const hay = [c.name, c.folder, c.job_title, c.job_company, c.verdict]
+          .filter(Boolean).join(" ").toLowerCase();
+        return hay.includes(q);
+      });
+      if (state.companySort === "score") rows.sort((a, b) => (b.score || 0) - (a.score || 0));
+      if (state.companySort === "score_asc") rows.sort((a, b) => (a.score || 0) - (b.score || 0));
+      if (state.companySort === "name") rows.sort((a, b) => (a.name || "").localeCompare(b.name || "", "zh-CN"));
+      return rows;
+    });
+
+    const clearFilters = () => {
+      state.companyQuery = "";
+      state.companyKind = "";
+      state.companyVerdict = "";
+      state.companySort = "";
+      state.companyFrom = "";
+      state.companyTo = "";
+    };
+
+    const openLinkedJob = async (c) => {
+      if (!c.job_id) return;
+      try {
+        await openJobFromCompany(c.job_id);
+      } catch (err) {
+        toast(err.message, "err");
+      }
+    };
 
     const openCreate = async () => {
       form.open = true;
@@ -105,8 +158,9 @@ export const Companies = {
 
     return {
       s: state, form, jobs, bases, saving, strategy,
+      filteredCompanies, hasFilters, clearFilters,
       openCreate, pickJob, create, editStrategy, saveStrategy, openFolder, remove,
-      openEditor, shortDate,
+      openLinkedJob, openEditor, shortDate,
     };
   },
   template: `
@@ -119,8 +173,36 @@ export const Companies = {
     <div class="panel">
       <div class="panel-head">
         <h2>档案列表</h2>
-        <span class="hint">{{ (s.companies || []).length }} 家</span>
+        <span class="hint">{{ filteredCompanies.length }}{{ hasFilters ? ' / ' + (s.companies || []).length : '' }} 家</span>
         <button class="primary" @click="openCreate">新建公司档案</button>
+      </div>
+      <div class="filter-bar">
+        <div class="search-field">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="6.2"/><path d="M15.2 15.2L20 20"/>
+          </svg>
+          <input v-model="s.companyQuery" placeholder="搜公司 / 岗位 / 文件夹">
+        </div>
+        <date-range v-model:from="s.companyFrom" v-model:to="s.companyTo" label="更新日期" />
+        <select v-model="s.companyKind" class="filter-select" style="width:120px">
+          <option value="">全部类型</option>
+          <option value="general">通用母版</option>
+          <option value="company">公司定制</option>
+        </select>
+        <select v-model="s.companyVerdict" class="filter-select" style="width:128px">
+          <option value="">全部结论</option>
+          <option value="go">建议投</option>
+          <option value="maybe">可投</option>
+          <option value="review">待核对</option>
+          <option value="no">不建议投</option>
+        </select>
+        <select v-model="s.companySort" class="filter-select" style="width:150px">
+          <option value="">默认顺序</option>
+          <option value="score">匹配度从高到低</option>
+          <option value="score_asc">匹配度从低到高</option>
+          <option value="name">公司名 A-Z</option>
+        </select>
+        <button class="filter-clear" v-if="hasFilters" @click="clearFilters">清除筛选</button>
       </div>
       <div class="table-wrap">
         <table>
@@ -130,7 +212,7 @@ export const Companies = {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="c in (s.companies || [])" :key="c.id">
+            <tr v-for="c in filteredCompanies" :key="c.id">
               <td>
                 <div class="strong">{{ c.name }}
                   <span class="badge plain" v-if="c.kind === 'general'">通用</span>
@@ -140,7 +222,10 @@ export const Companies = {
               <td>
                 <div class="hint" v-if="c.kind === 'general'">母版 · 不属于任何公司</div>
                 <template v-else>
-                  <div>{{ c.job_title || '—' }}</div>
+                  <button class="job-link" v-if="c.job_id" @click="openLinkedJob(c)" title="打开岗位详情">
+                    {{ c.job_title || '岗位 #' + c.job_id }}
+                  </button>
+                  <div v-else>{{ c.job_title || '—' }}</div>
                   <div class="hint" v-if="c.job_company">{{ c.job_company }}</div>
                 </template>
               </td>
@@ -159,7 +244,7 @@ export const Companies = {
                   <span class="badge plain" v-if="c.files && c.files.jd">JD</span>
                 </div>
               </td>
-              <td class="hint">{{ shortDate(c.updated_at) }}</td>
+              <td class="hint nowrap">{{ shortDate(c.updated_at) }}</td>
               <td style="white-space:nowrap">
                 <div class="actions">
                   <button class="mini" @click="openEditor(c.id)">打开编辑器</button>
@@ -169,10 +254,10 @@ export const Companies = {
                 </div>
               </td>
             </tr>
-            <tr v-if="!(s.companies || []).length">
+            <tr v-if="!filteredCompanies.length">
               <td colspan="6">
                 <div class="empty">
-                  还没有公司档案。从「岗位」页打开一份 JD，点「建公司档案」，或在这里直接新建。
+                  {{ hasFilters ? '这个筛选条件下没有公司档案' : '还没有公司档案。从「岗位」页打开一份 JD，点「建公司档案」，或在这里直接新建。' }}
                 </div>
               </td>
             </tr>

@@ -350,6 +350,40 @@ class TestReanalyzeKeepsGapProgress(HttpCase):
         self.assertTrue(Path(md["path"]).exists())
 
 
+class TestJobDateFilter(HttpCase):
+    def test_date_range_is_inclusive_and_combines_with_search(self):
+        ids = []
+        for day, suffix in (("2026-11-01", "A"), ("2026-11-10", "B"), ("2026-11-20", "C")):
+            out = self.call("/api/jobs", "POST", {
+                "company": "DateFilterCo",
+                "title": f"DateFilterJob{suffix}",
+                "jd_raw": f"岗位职责：负责后端开发。\n任职要求：熟悉 Java、MySQL。\n（{suffix}）",
+            })
+            self.assertTrue(out.get("ok"), out)
+            ids.append(out["job_id"])
+
+        conn = db.connect()
+        try:
+            db.init_db(conn)
+            for day, jid in zip(("2026-11-01", "2026-11-10", "2026-11-20"), ids):
+                conn.execute(
+                    "UPDATE jobs SET created_at=? WHERE id=?",
+                    (day + "T12:00:00", jid),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        try:
+            items = self.call(
+                "/api/jobs?q=DateFilterCo&date_from=2026-11-05&date_to=2026-11-15"
+            )["items"]
+            self.assertEqual([r["title"] for r in items], ["DateFilterJobB"])
+        finally:
+            for jid in ids:
+                self.call(f"/api/jobs/{jid}", "DELETE")
+
+
 class TestBaseEdit(HttpCase):
     def test_get_and_patch_base_content(self):
         created = self.call("/api/bases", "POST", {

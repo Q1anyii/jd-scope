@@ -12,6 +12,7 @@ import { Bases } from "./pages/bases.js";
 import { Companies } from "./pages/companies.js";
 import { Profile } from "./pages/profile.js";
 import { Settings } from "./pages/settings.js";
+import { DateRange } from "./date-range.js";
 
 const { createApp, computed, onMounted } = window.Vue;
 
@@ -157,6 +158,7 @@ const App = {
 };
 
 const app = createApp(App);
+app.component("date-range", DateRange);
 app.component("dashboard", Dashboard);
 app.component("intake", Intake);
 app.component("jobs-page", Jobs);
