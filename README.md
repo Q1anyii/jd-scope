@@ -160,6 +160,35 @@ powershell -ExecutionPolicy Bypass -File build\build_exe.ps1
 图标：`assets\icon-src.png` 为源图，`tools\png_to_ico.py` 负责裁边、圆角外透明、按尺寸简化（16px 去掉镜片内细线）并写出 7 层 ICO；没有源图时回退到 `tools\make_icon.py`（纯标准库绘制）。
 启动顺序：WebView2 原生窗口 → Edge/Chrome `--app` 窗口 → 默认浏览器。端口被占用会自动退回临时端口，不会静默失败。
 
+## 自动发布
+
+推送 `v*` tag 后，GitHub Actions 会自动完成打包并创建**草稿 Release**：
+
+```powershell
+git tag v0.3.6
+git push origin v0.3.6
+```
+
+流水线会先校验 tag 与 `app/config.py` 的 `APP_VERSION` 一致，然后在 `windows-latest` 上执行 `build\build_exe.ps1 -SkipShortcut`，上传 `dist\JDScope.exe`，并用 `--generate-notes` 从提交历史生成摘要草稿。你只需要打开 Releases，改一下摘要，确认发布。
+
+## 代码签名
+
+签名不是“写一段代码让 Windows 信任”，而是用受信任的代码签名证书给 exe 做 Authenticode 签名。
+
+- 不签名：SmartScreen 会提示「Windows 已保护你的电脑」。
+- 自签名证书：对公开用户与不签名基本一样，仍会提示未知发布者，只适合内部测试。
+- OV / EV 证书、Azure Artifact Signing：会显示已验证的发布者，但**首次下载仍可能提示**，需要同一发布者持续签名来积累声誉；EV 已不再直接绕过 SmartScreen。
+- 签名能改善“未知发布者”的信任问题，但不是杀毒白名单，不能保证不被误报。
+
+如果要启用签名，在仓库 Secrets 中配置：
+
+- `WINDOWS_CERT_PFX_BASE64`：`.pfx` 文件的 Base64
+- `WINDOWS_CERT_PFX_PASSWORD`：`.pfx` 密码
+
+工作流会自动调用 `signtool` 签名并验证；未配置时构建保持未签名，不会伪造证书。证书需要自行向 CA 申请（Azure Artifact Signing 目前对个人开发者仅开放美国/加拿大，组织开放美国/加拿大/欧盟/英国），中国大陆个人开发者通常需要走 OV 证书渠道；具体以 CA 和微软的资格审核为准。
+
+参考：[SmartScreen reputation](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)、[Code signing options](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)。
+
 ## 测试
 
 ```powershell

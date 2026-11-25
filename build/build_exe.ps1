@@ -1,5 +1,8 @@
 # Build a single-file Windows desktop executable (no console window).
 # Usage: powershell -ExecutionPolicy Bypass -File build\build_exe.ps1
+# CI: add -SkipShortcut to avoid creating a desktop shortcut on the runner.
+
+param([switch]$SkipShortcut)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -47,7 +50,11 @@ if ($pyinstaller) {
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed' }
 
 Write-Host '[4/4] refreshing desktop shortcut'
-& "$root\build\create_shortcut.ps1"
+if ($SkipShortcut) {
+  Write-Host 'skipped (CI build)'
+} else {
+  & "$root\build\create_shortcut.ps1"
+}
 
 Write-Host ''
 Write-Host ('done: ' + (Join-Path $root 'dist\JDScope.exe'))

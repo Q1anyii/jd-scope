@@ -1,0 +1,106 @@
+name: Draft Release
+
+run-name: Draft JDScope ${{ github.ref_name }}
+
+"on":
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Verify tag matches APP_VERSION
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME.TrimStart('v')
+          $match = Select-String -Path app/config.py -Pattern 'APP_VERSION = "([^"]+)"'
+          if (-not $match) { throw 'APP_VERSION not found in app/config.py' }
+          $version = $match.Matches[0].Groups[1].Value
+          if ($tag -ne $version) {
+            throw "Tag v$tag does not match APP_VERSION $version"
+          }
+          Write-Host "Tag v$tag matches APP_VERSION $version"
+
+      - name: Build exe
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File build/build_exe.ps1 -SkipShortcut
+
+      # Optional Authenticode signing. Configure both repository secrets to enable:
+      #   WINDOWS_CERT_PFX_BASE64  base64 of the .pfx file
+      #   WINDOWS_CERT_PFX_PASSWORD  its password
+      # Without a trusted certificate the build stays unsigned; a self-signed
+      # certificate does not remove SmartScreen warnings for other users.
+      - name: Sign exe (optional)
+        shell: pwsh
+        env:
+          CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          CERT_PFX_PASSWORD: ${{ secrets.WINDOWS_CERT_PFX_PASSWORD }}
+        run: |
+          if (-not $env:CERT_PFX_BASE64) {
+            Write-Host 'No WINDOWS_CERT_PFX_BASE64 secret; release will be unsigned.'
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'jdscope-codesign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_PFX_BASE64))
+          try {
+            $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
+            if (-not $signtool) {
+              $signtool = (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' |
+                Sort-Object FullName -Descending | Select-Object -First 1).FullName
+            }
+            if (-not $signtool) { throw 'signtool.exe not found on runner' }
+            & $signtool sign /fd SHA256 /f $pfx /p $env:CERT_PFX_PASSWORD `
+              /tr http://timestamp.digicert.com /td SHA256 dist\JDScope.exe
+            if ($LASTEXITCODE -ne 0) { throw 'signtool sign failed' }
+            & $signtool verify /pa /v dist\JDScope.exe
+            if ($LASTEXITCODE -ne 0) { throw 'signature verification failed' }
+          } finally {
+            Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Record SHA-256
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist\JDScope.exe -Algorithm SHA256).Hash
+          "SHA256=$hash" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Create or update draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $title = 'JDScope ' + $tag.TrimStart('v')
+          $existing = gh release view $tag --json isDraft,url 2>$null | ConvertFrom-Json
+          if ($LASTEXITCODE -eq 0) {
+            if (-not $existing.isDraft) {
+              Write-Host "Release $tag is already published; leaving it unchanged."
+              exit 0
+            }
+            gh release upload $tag dist\JDScope.exe --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'upload to existing draft failed' }
+            Write-Host "Updated existing draft: $($existing.url)"
+          } else {
+            gh release create $tag dist\JDScope.exe --draft --title $title --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw 'draft release creation failed' }
+          }
